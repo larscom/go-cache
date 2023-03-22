@@ -18,6 +18,52 @@ You can import `go-cache` using:
 import (
     "github.com/larscom/go-cache"
 )
+
+func main() {
+    // create a new cache with `int` type as key and `string` type as value
+    c := cache.NewCache[int, string]()
+
+    // with time to live of 10 seconds
+    ttl := cache.WithExpireAfterWrite[int, string](time.Second * 10)
+    c := cache.NewCache(ttl)
+
+    // with loader, automatically updates the cache after retrieving the value
+	loader := cache.WithLoader[int, string](func(key int) (string, error) {
+        resp, err := http.Get("https://example.com")
+        if err != nil {
+            return "", err
+        }
+        defer resp.Body.Close()
+        r, err := ioutil.ReadAll(resp.Body)
+        return string(r), nil
+	})
+    c := cache.NewCache(loader)
+
+    // with on expired callback
+	onExpired := cache.WithOnExpired[int, string](func(key int, value string) {
+        // do something with expired key/value
+	})
+    c := cache.NewCache(onExpired)
+
+    // or you can add them all...
+    c := cache.NewCache(ttl, loader, onExpired)
+}
 ```
 
-## 🤠 Examples
+## 🤠 Interface
+
+```go
+type ICache[Key comparable, Value any] interface {
+	Clear()
+	Close()
+	Count() int
+	ForEach(func(Key, Value))
+	Get(Key) (Value, bool, error)
+	Has(Key) bool
+	Keys() []Key
+	Put(Key, Value)
+	Reload(Key) (Value, bool, error)
+	Remove(Key)
+	Values() []Value
+}
+```
