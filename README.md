@@ -46,7 +46,8 @@ With `loader` function
 
 ```go
 func main() {
-    c := cache.NewCache(cache.WithLoader[int, string](func(key int) (string, error) {
+    // this loader function gets only called once, even when calling from multiple go routines
+    loader := cache.WithLoader[int, string](func(key int) (string, error) {
         resp, err := http.Get(fmt.Sprintf("https://example.com/user/%d", key))
         if err != nil {
             return "", err
@@ -54,8 +55,9 @@ func main() {
         defer resp.Body.Close()
         r, err := ioutil.ReadAll(resp.Body)
         return string(r), nil
-	}))
-    defer c.Close()
+	})
+
+    c := cache.NewCache(loader)
 }
 ```
 

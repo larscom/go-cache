@@ -32,6 +32,7 @@ type Cache[Key comparable, Value any] struct {
 	keys             []Key
 	maxSize          int
 	loader           LoaderFunc[Key, Value]
+	keyedMutex       KeyedMutex[Key]
 	onExpired        func(Key, Value)
 	expireAfterWrite time.Duration
 	withExpiration   bool
@@ -92,9 +93,14 @@ func (c *Cache[Key, Value]) ForEach(fn func(Key, Value)) {
 }
 
 func (c *Cache[Key, Value]) Get(key Key) (Value, bool, error) {
+	unlock := c.keyedMutex.lock(key)
+
 	entry, found := c.getSafe(key)
 	if found {
+		unlock()
 		return entry.value, true, nil
+	} else {
+		defer unlock()
 	}
 
 	value, ok, err := c.load(key)
@@ -149,13 +155,8 @@ func (c *Cache[Key, Value]) Put(key Key, value Value) {
 }
 
 func (c *Cache[Key, Value]) Reload(key Key) (Value, bool, error) {
-	value, ok, err := c.load(key)
-
-	if ok {
-		c.Put(key, value)
-	}
-
-	return value, ok, err
+	c.removeSafe(key)
+	return c.Get(key)
 }
 
 func (c *Cache[Key, Value]) Remove(key Key) {
@@ -257,6 +258,7 @@ func (c *Cache[Key, Value]) load(key Key) (Value, bool, error) {
 	}
 
 	value, err := c.loader(key)
+
 	return value, err == nil, err
 }
 

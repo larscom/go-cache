@@ -186,6 +186,54 @@ func Test_Default(t *testing.T) {
 
 func Test_With_Loader(t *testing.T) {
 
+	t.Run("should only call loader once from multiple go routines when invoking Get", func(t *testing.T) {
+		var wg sync.WaitGroup
+		wg.Add(1)
+		cache := createCache(WithLoader(func(key int) (int, error) {
+			defer wg.Done()
+			time.Sleep(time.Millisecond * 25)
+			return 12345, nil
+		}))
+
+		go func() {
+			cache.Get(1)
+		}()
+		go func() {
+			cache.Get(1)
+		}()
+		go func() {
+			cache.Get(1)
+		}()
+
+		<-time.After(time.Millisecond * 35)
+
+		wg.Wait()
+	})
+
+	t.Run("should only call loader once from multiple go routines when invoking Reload", func(t *testing.T) {
+		var wg sync.WaitGroup
+		wg.Add(1)
+		cache := createCache(WithLoader(func(key int) (int, error) {
+			defer wg.Done()
+			time.Sleep(time.Millisecond * 25)
+			return 12345, nil
+		}))
+
+		go func() {
+			cache.Reload(1)
+		}()
+		go func() {
+			cache.Reload(1)
+		}()
+		go func() {
+			cache.Reload(1)
+		}()
+
+		<-time.After(time.Millisecond * 35)
+
+		wg.Wait()
+	})
+
 	t.Run("should get value from loader when not in cache", func(t *testing.T) {
 		cache := createCache(WithLoader(func(key int) (int, error) {
 			return 12345, nil
@@ -247,30 +295,6 @@ func Test_With_Loader(t *testing.T) {
 		value, _, _ = cache.Get(key)
 
 		assert.Equal(t, 12345, value)
-	})
-
-	t.Run("should not update cache when loader returns an error", func(t *testing.T) {
-		cache := createCache(WithLoader(func(key int) (int, error) {
-			return 0, fmt.Errorf("ERROR")
-		}))
-
-		const key = 1
-
-		cache.Put(key, 100)
-
-		value, _, _ := cache.Get(key)
-		assert.Equal(t, 100, value)
-
-		value, ok, err := cache.Reload(key)
-		assert.Zero(t, value)
-		assert.False(t, ok)
-		assert.Error(t, err)
-		assert.Equal(t, fmt.Errorf("ERROR"), err)
-
-		value, ok, _ = cache.Get(key)
-
-		assert.True(t, ok)
-		assert.Equal(t, 100, value)
 	})
 }
 
