@@ -1,2 +1,4 @@
 bin/
 *_bin
+*.html
+*.out

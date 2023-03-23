@@ -1,8 +1,9 @@
 build:
-	go build -o bin/go-cache main.go
-
-run: build
-	./bin/go-cache
+	go build -v ./...
 
 test:
-	go test -v -cover ./.../ --race
+	go test -v ./.../ --race
+
+coverage:
+	go test -v -coverprofile=cover.out -covermode=atomic ./.../
+	go tool cover -html=cover.out -o cover.html
