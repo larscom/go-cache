@@ -149,6 +149,22 @@ func Test_Default(t *testing.T) {
 		assert.False(t, found)
 	})
 
+	t.Run("should get back a map implementation", func(t *testing.T) {
+		cache := createCache()
+		cache.Put(1, 100)
+		cache.Put(2, 200)
+		cache.Put(3, 300)
+
+		m := cache.ToMap()
+
+		assert.Equal(t, cache.Count(), len(m))
+
+		for key, value := range m {
+			cachedVal, _, _ := cache.Get(key)
+			assert.Equal(t, cachedVal, value)
+		}
+	})
+
 	t.Run("should be able to get all keys from cache", func(t *testing.T) {
 		cache := createCache()
 		cache.Put(1, 100)

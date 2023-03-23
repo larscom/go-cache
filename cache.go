@@ -23,6 +23,7 @@ type ICache[Key comparable, Value any] interface {
 	Put(Key, Value)
 	Reload(Key) (Value, bool, error)
 	Remove(Key)
+	ToMap() map[Key]Value
 	Values() []Value
 }
 
@@ -146,6 +147,16 @@ func (c *Cache[Key, Value]) Remove(key Key) {
 		}
 	}
 	c.remove(key)
+}
+
+func (c *Cache[Key, Value]) ToMap() map[Key]Value {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	m := make(map[Key]Value)
+	for key, entry := range c.data {
+		m[key] = entry.value
+	}
+	return m
 }
 
 func (c *Cache[Key, Value]) Values() []Value {
