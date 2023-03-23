@@ -36,6 +36,7 @@ With `TTL`
 ```go
 func main() {
     c := cache.NewCache(cache.WithExpireAfterWrite[int, string](time.Second * 10))
+    defer c.Close()
 }
 ```
 
@@ -54,6 +55,7 @@ func main() {
         r, err := ioutil.ReadAll(resp.Body)
         return string(r), nil
 	}))
+    defer c.Close()
 }
 ```
 
@@ -73,8 +75,10 @@ With `onExpire` function
 
 ```go
 func main() {
-    c := cache.NewCache(cache.WithOnExpired[int, string](func(key int, value string) {
+    ttl := cache.WithExpireAfterWrite[int, string](time.Second * 10)
+    c := cache.NewCache(ttl, cache.WithOnExpired[int, string](func(key int, value string) {
         // do something with expired key/value
 	}))
+    defer c.Close()
 }
 ```
