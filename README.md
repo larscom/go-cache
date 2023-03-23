@@ -5,8 +5,6 @@
 
 > Simple in-memory `thread safe` cache with loader (optional) and TTL (optional)
 
-Although performing pretty well, the goal of this cache is not to be the fastest and/or the most memory efficient. Under the hood this cache just uses a map to store its data.
-
 ## 🚀 Install
 
 ```sh
@@ -56,6 +54,16 @@ func main() {
         r, err := ioutil.ReadAll(resp.Body)
         return string(r), nil
 	}))
+}
+```
+
+With `max size`
+
+> Create a new cache with a fixed size of 300
+
+```go
+func main() {
+    c := cache.NewCache(cache.WithMaxSize[int, int](300))
 }
 ```
 

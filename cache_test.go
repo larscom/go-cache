@@ -420,3 +420,18 @@ func Test_With_OnExpired(t *testing.T) {
 		wg.Wait()
 	})
 }
+
+func Test_With_MaxSize(t *testing.T) {
+
+	t.Run("should remove the first key if going above max size", func(t *testing.T) {
+
+		cache := createCache(WithMaxSize[int, int](3))
+		cache.Put(1, 100)
+		cache.Put(2, 200)
+		cache.Put(3, 300)
+		cache.Put(4, 400)
+
+		assert.Equal(t, 3, cache.Count())
+		assert.ElementsMatch(t, []int{2, 3, 4}, cache.Keys())
+	})
+}
