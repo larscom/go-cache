@@ -155,7 +155,7 @@ func (c *Cache[Key, Value]) Put(key Key, value Value) {
 }
 
 func (c *Cache[Key, Value]) Reload(key Key) (Value, bool, error) {
-	c.removeSafe(key)
+	c.Remove(key)
 	return c.Get(key)
 }
 
