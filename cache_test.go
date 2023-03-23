@@ -434,4 +434,23 @@ func Test_With_MaxSize(t *testing.T) {
 		assert.Equal(t, 3, cache.Count())
 		assert.ElementsMatch(t, []int{2, 3, 4}, cache.Keys())
 	})
+
+	t.Run("should cancel expire and then remove first key if TTL is enabled", func(t *testing.T) {
+		var wg sync.WaitGroup
+		wg.Add(1)
+
+		ttl := WithExpireAfterWrite[int, int](20 * time.Millisecond)
+		cache := createCache(ttl, WithMaxSize[int, int](1), WithOnExpired(func(key, value int) {
+			defer wg.Done()
+			assert.Equal(t, 2, key)
+			assert.Equal(t, 200, value)
+		}))
+
+		cache.Put(1, 100)
+		cache.Put(2, 200)
+
+		<-time.After(time.Millisecond * 30)
+
+		wg.Wait()
+	})
 }
