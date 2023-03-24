@@ -113,7 +113,7 @@ func (c *Cache[Key, Value]) Get(key Key) (Value, bool, error) {
 	unlock := c.keyedMutex.lock(key)
 
 	entry, found := c.getSafe(key)
-	if found {
+	if found && !entry.isExpired(c.expireAfterWrite) {
 		unlock()
 		return entry.value, true, nil
 	} else {
@@ -241,6 +241,19 @@ type cacheEntry[Key comparable, Value any] struct {
 	updated time.Time
 }
 
+func (c *Cache[Key, Value]) newEntry(key Key, value Value) *cacheEntry[Key, Value] {
+	updated := time.Now()
+	return &cacheEntry[Key, Value]{key, value, updated}
+}
+
+func (e *cacheEntry[Key, Value]) isExpired(expireAfterWrite time.Duration) bool {
+	if expireAfterWrite > 0 {
+		now := time.Now()
+		return now.Sub(e.updated) > expireAfterWrite
+	}
+	return false
+}
+
 func (c *Cache[Key, Value]) cleanup() {
 	keys := c.Keys()
 
@@ -287,17 +300,4 @@ func (c *Cache[Key, Value]) removeSafe(key Key) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.data, key)
-}
-
-func (c *Cache[Key, Value]) newEntry(key Key, value Value) *cacheEntry[Key, Value] {
-	updated := time.Now()
-	return &cacheEntry[Key, Value]{key, value, updated}
-}
-
-func (e *cacheEntry[Key, Value]) isExpired(expireAfterWrite time.Duration) bool {
-	if expireAfterWrite > 0 {
-		now := time.Now()
-		return now.Sub(e.updated) > expireAfterWrite
-	}
-	return false
 }
