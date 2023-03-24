@@ -63,7 +63,7 @@ func main() {
 
 With `max size`
 
-> Create a new cache with a fixed size of 300
+> Create a new cache with a fixed size of 300. When going beyond the max size, the first item is removed from the cache.
 
 ```go
 func main() {

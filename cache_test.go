@@ -116,14 +116,15 @@ func Test_Default(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("should be able to call reload without loader function", func(t *testing.T) {
+	t.Run("should be able to call reload without loader function and receive an error", func(t *testing.T) {
 		cache := createCache()
 
 		val, ok, err := cache.Reload(1)
 
 		assert.Zero(t, val)
 		assert.False(t, ok)
-		assert.NoError(t, err)
+		assert.Error(t, err)
+		assert.Equal(t, fmt.Errorf("Cache doesn't contain a loader function"), err)
 	})
 
 	t.Run("should be able to call remove on a key that doesnt exist", func(t *testing.T) {
@@ -446,6 +447,20 @@ func Test_With_OnExpired(t *testing.T) {
 }
 
 func Test_With_MaxSize(t *testing.T) {
+
+	t.Run("should get keys in order", func(t *testing.T) {
+
+		cache := createCache(WithMaxSize[int, int](3))
+		cache.Put(1, 100)
+		cache.Put(2, 200)
+		cache.Put(3, 300)
+		cache.Put(4, 400)
+
+		for i := 0; i < 50; i++ {
+			assert.Equal(t, []int{2, 3, 4}, cache.Keys())
+		}
+
+	})
 
 	t.Run("should remove the first key if going above max size", func(t *testing.T) {
 

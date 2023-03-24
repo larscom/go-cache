@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -13,30 +14,54 @@ type Option[Key comparable, Value any] func(c *Cache[Key, Value])
 type LoaderFunc[Key comparable, Value any] func(Key) (Value, error)
 
 type ICache[Key comparable, Value any] interface {
+	// Clears the whole cache
 	Clear()
+	// Close any remaining timers
 	Close()
+	// Total amount of entries
 	Count() int
+	// Loop over each entry in the cache
 	ForEach(func(Key, Value))
+	// If cache is created with 'WithLoader' it'll use the loader function to get
+	// an item if it's not available in the cache.
+	// It'll be in the cache afterwards
+	// The loader function is only ever called once, even if multiple goroutines ask for it.
 	Get(Key) (Value, bool, error)
+	// Check to see if the cache contains a key
 	Has(Key) bool
+	// If cached is created with 'WithMaxSize' option you get the keys in order from oldest to newest.
+	// Otherwise the keys will be in an indeterminate order.
 	Keys() []Key
+	// Add a new item to the cache
 	Put(Key, Value)
+	// Reload the item in the cache, this will remove the entry from the cache first and
+	// call the loader function afterwards.
 	Reload(Key) (Value, bool, error)
+	// Remove one item from the cache
 	Remove(Key)
+	// Get the map with the key/value pairs, it will be in indeterminate order.
 	ToMap() map[Key]Value
+	// Get all values, it will be in indeterminate order.
 	Values() []Value
 }
 
 type Cache[Key comparable, Value any] struct {
-	data             map[Key]*cacheEntry[Key, Value]
-	keys             []Key
-	maxSize          int
-	loader           LoaderFunc[Key, Value]
-	keyedMutex       KeyedMutex[Key]
+	data map[Key]*cacheEntry[Key, Value]
+	keys []Key
+
+	maxSize     int
+	withMaxSize bool
+
+	loader     LoaderFunc[Key, Value]
+	withLoader bool
+
+	keyedMutex KeyedMutex[Key]
+
 	onExpired        func(Key, Value)
 	expireAfterWrite time.Duration
 	withExpiration   bool
-	mu               sync.RWMutex
+
+	mu sync.RWMutex
 
 	rootCtx  context.Context
 	closeCtx context.CancelFunc
@@ -118,6 +143,9 @@ func (c *Cache[Key, Value]) Has(key Key) bool {
 }
 
 func (c *Cache[Key, Value]) Keys() []Key {
+	if c.withMaxSize {
+		return c.keys
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return maps.Keys(c.data)
@@ -134,7 +162,7 @@ func (c *Cache[Key, Value]) Put(key Key, value Value) {
 		c.expire(entry)
 	}
 
-	if c.maxSize > 0 && len(c.keys) == c.maxSize {
+	if c.withMaxSize && len(c.keys) == c.maxSize {
 		c.mu.Lock()
 		firstKey := c.keys[0]
 
@@ -155,6 +183,11 @@ func (c *Cache[Key, Value]) Put(key Key, value Value) {
 }
 
 func (c *Cache[Key, Value]) Reload(key Key) (Value, bool, error) {
+	if !c.withLoader {
+		var val Value
+		return val, false, fmt.Errorf("Cache doesn't contain a loader function")
+	}
+
 	c.Remove(key)
 	return c.Get(key)
 }
@@ -206,6 +239,7 @@ func WithLoader[Key comparable, Value any](
 ) Option[Key, Value] {
 	return func(c *Cache[Key, Value]) {
 		c.loader = loader
+		c.withLoader = loader != nil
 	}
 }
 
@@ -222,6 +256,7 @@ func WithMaxSize[Key comparable, Value any](
 ) Option[Key, Value] {
 	return func(c *Cache[Key, Value]) {
 		c.maxSize = maxSize
+		c.withMaxSize = maxSize > 0
 		c.keys = make([]Key, maxSize)
 	}
 }
@@ -252,7 +287,7 @@ func (c *Cache[Key, Value]) expire(entry *cacheEntry[Key, Value]) {
 }
 
 func (c *Cache[Key, Value]) load(key Key) (Value, bool, error) {
-	if c.loader == nil {
+	if !c.withLoader {
 		var val Value
 		return val, false, nil
 	}
