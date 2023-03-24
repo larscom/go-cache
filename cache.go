@@ -59,12 +59,13 @@ type Cache[Key comparable, Value any] struct {
 
 	onExpired        func(Key, Value)
 	expireAfterWrite time.Duration
-	withExpiration   bool
 
 	mu sync.RWMutex
 
 	rootCtx  context.Context
 	closeCtx context.CancelFunc
+
+	ticker *ticker
 }
 
 func NewCache[Key comparable, Value any](
@@ -75,27 +76,18 @@ func NewCache[Key comparable, Value any](
 		data:     make(map[Key]*cacheEntry[Key, Value]),
 		rootCtx:  ctx,
 		closeCtx: cancel,
+		ticker:   newTicker(ctx, time.Second*5),
 	}
 	for _, opt := range options {
 		opt(c)
 	}
+	c.ticker.start(c.cleanup)
 	return c
 }
 
 func (c *Cache[Key, Value]) Clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	if c.withExpiration {
-		copy := make(map[Key]*cacheEntry[Key, Value])
-		for k, v := range c.data {
-			copy[k] = v
-		}
-		for _, entry := range copy {
-			entry.cancel()
-		}
-	}
-
 	c.data = make(map[Key]*cacheEntry[Key, Value])
 }
 
@@ -154,24 +146,9 @@ func (c *Cache[Key, Value]) Keys() []Key {
 func (c *Cache[Key, Value]) Put(key Key, value Value) {
 	entry := c.newEntry(key, value)
 
-	if c.withExpiration {
-		currentEntry, found := c.getSafe(entry.key)
-		if found {
-			currentEntry.cancel()
-		}
-		c.expire(entry)
-	}
-
 	if c.withMaxSize && len(c.keys) == c.maxSize {
 		c.mu.Lock()
 		firstKey := c.keys[0]
-
-		if c.withExpiration {
-			firstEntry, found := c.data[firstKey]
-			if found {
-				firstEntry.cancel()
-			}
-		}
 
 		delete(c.data, firstKey)
 		c.keys = c.keys[1:]
@@ -193,12 +170,6 @@ func (c *Cache[Key, Value]) Reload(key Key) (Value, bool, error) {
 }
 
 func (c *Cache[Key, Value]) Remove(key Key) {
-	if c.withExpiration {
-		entry, found := c.getSafe(key)
-		if found {
-			entry.cancel()
-		}
-	}
 	c.removeSafe(key)
 }
 
@@ -230,7 +201,6 @@ func WithExpireAfterWrite[Key comparable, Value any](
 ) Option[Key, Value] {
 	return func(c *Cache[Key, Value]) {
 		c.expireAfterWrite = expireAfterWrite
-		c.withExpiration = expireAfterWrite > 0
 	}
 }
 
@@ -266,24 +236,27 @@ func WithMaxSize[Key comparable, Value any](
  */
 
 type cacheEntry[Key comparable, Value any] struct {
-	key    Key
-	value  Value
-	ctx    context.Context
-	cancel context.CancelFunc
+	key     Key
+	value   Value
+	updated time.Time
 }
 
-func (c *Cache[Key, Value]) expire(entry *cacheEntry[Key, Value]) {
-	go func() {
-		select {
-		case <-time.After(c.expireAfterWrite):
-			c.removeSafe(entry.key)
+func (c *Cache[Key, Value]) cleanup() {
+	keys := c.Keys()
+
+	for _, key := range keys {
+		entry, found := c.getSafe(key)
+		if found && entry.isExpired(c.expireAfterWrite) {
+			c.removeSafe(key)
 			if c.onExpired != nil {
 				c.onExpired(entry.key, entry.value)
 			}
-		case <-entry.ctx.Done():
-			return
 		}
-	}()
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 }
 
 func (c *Cache[Key, Value]) load(key Key) (Value, bool, error) {
@@ -317,12 +290,14 @@ func (c *Cache[Key, Value]) removeSafe(key Key) {
 }
 
 func (c *Cache[Key, Value]) newEntry(key Key, value Value) *cacheEntry[Key, Value] {
-	var ctx context.Context
-	var cancel context.CancelFunc
+	updated := time.Now()
+	return &cacheEntry[Key, Value]{key, value, updated}
+}
 
-	if c.withExpiration {
-		ctx, cancel = context.WithCancel(c.rootCtx)
+func (e *cacheEntry[Key, Value]) isExpired(expireAfterWrite time.Duration) bool {
+	if expireAfterWrite > 0 {
+		now := time.Now()
+		return now.Sub(e.updated) > expireAfterWrite
 	}
-
-	return &cacheEntry[Key, Value]{key, value, ctx, cancel}
+	return false
 }
