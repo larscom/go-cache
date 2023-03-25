@@ -109,15 +109,6 @@ func Test_Core(t *testing.T) {
 		assert.True(t, found)
 		assert.NoError(t, err)
 	})
-	t.Run("reload error", func(t *testing.T) {
-		cache := createCache()
-		val, ok, err := cache.Reload(1)
-
-		assert.Zero(t, val)
-		assert.False(t, ok)
-		assert.Error(t, err)
-		assert.Equal(t, fmt.Errorf("cache doesn't contain a loader function"), err)
-	})
 	t.Run("remove", func(t *testing.T) {
 		cache := createCache()
 		const key = 1
@@ -382,52 +373,47 @@ func Test_WithLoader(t *testing.T) {
 
 		assert.Equal(t, 2, int(r))
 	})
-	t.Run("reload", func(t *testing.T) {
-		cache := createCache(WithLoader(func(key int) (int, error) {
-			return 12345, nil
-		}))
 
-		const key = 1
+}
 
-		cache.Put(key, 100)
+func Test_WithMaxSize(t *testing.T) {
+	t.Run("put", func(t *testing.T) {
+		c := createCache(WithMaxSize[int, int](3))
+		c.Put(1, 100)
+		c.Put(2, 200)
+		c.Put(3, 300)
+		c.Put(4, 400)
 
-		value, _, _ := cache.Get(key)
-		assert.Equal(t, 100, value)
-
-		value, ok, err := cache.Reload(key)
-		assert.True(t, ok)
-		assert.NoError(t, err)
-		assert.Equal(t, 12345, value)
-
-		value, _, _ = cache.Get(key)
-
-		assert.Equal(t, 12345, value)
+		assert.Equal(t, 3, c.Count())
+		assert.ElementsMatch(t, []int{2, 3, 4}, c.Keys())
 	})
-	t.Run("call reload once per key", func(t *testing.T) {
-		var counter int32
-		cache := createCache(WithLoader(func(key int) (int, error) {
-			atomic.AddInt32(&counter, 1)
-			time.Sleep(time.Millisecond * 10)
-			return 12345, nil
-		}))
 
-		go func() {
-			cache.Reload(1)
-		}()
-		go func() {
-			cache.Reload(1)
-		}()
-		go func() {
-			cache.Reload(2)
-		}()
-		go func() {
-			cache.Reload(2)
-		}()
+	t.Run("remove", func(t *testing.T) {
+		c := createCache(WithMaxSize[int, int](3))
+		c.Put(1, 100)
+		c.Put(2, 200)
+		c.Put(3, 300)
 
-		<-time.After(time.Millisecond * 15)
+		c.Remove(2)
 
-		r := atomic.LoadInt32(&counter)
+		c.Put(2, 202)
+		c.Put(4, 400)
 
-		assert.Equal(t, 2, int(r))
+		vals := c.Values()
+		keys := c.Keys()
+
+		assert.Len(t, vals, 3)
+		assert.Len(t, keys, 3)
+		assert.Equal(t, []int{3, 2, 4}, keys)
+
+		val, _, _ := c.Get(3)
+		assert.Equal(t, 300, val)
+
+		val, _, _ = c.Get(2)
+		assert.Equal(t, 202, val)
+
+		val, _, _ = c.Get(4)
+		assert.Equal(t, 400, val)
 	})
+
 }

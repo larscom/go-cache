@@ -1,8 +1,8 @@
 package cache
 
 import (
+	"container/list"
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -16,28 +16,24 @@ type LoaderFunc[Key comparable, Value any] func(Key) (Value, error)
 type ICache[Key comparable, Value any] interface {
 	// Clears the whole cache
 	Clear()
-	// Close any remaining timers
+	// Stop the timers
 	Close()
 	// Total amount of entries
 	Count() int
 	// Loop over each entry in the cache
 	ForEach(func(Key, Value))
 	// If cache is created with 'WithLoader' it'll use the loader function to get
-	// an item if it's not available in the cache.
-	// It'll be in the cache afterwards
-	// The loader function is only ever called once, even if multiple goroutines ask for it.
+	// an item and put it in the cache.
+	// The loader function is only ever called once, even if it's called from multiple goroutines.
 	Get(Key) (Value, bool, error)
 	// Check to see if the cache contains a key
 	Has(Key) bool
-	// If cached is created with 'WithMaxSize' option you get the keys in order from oldest to newest.
+	// If cache is created with 'WithMaxSize' option you get the keys in order from oldest to newest.
 	// Otherwise the keys will be in an indeterminate order.
 	Keys() []Key
 	// Add a new item to the cache
 	Put(Key, Value)
-	// Reload the item in the cache, this will remove the entry from the cache first and
-	// call the loader function afterwards.
-	Reload(Key) (Value, bool, error)
-	// Remove one item from the cache
+	// Remove an item from the cache
 	Remove(Key)
 	// Get the map with the key/value pairs, it will be in indeterminate order.
 	ToMap() map[Key]Value
@@ -46,8 +42,8 @@ type ICache[Key comparable, Value any] interface {
 }
 
 type Cache[Key comparable, Value any] struct {
-	entries map[Key]*cacheEntry[Key, Value]
-	keys    []Key
+	entries    map[Key]*cacheEntry[Key, Value]
+	entryQueue *list.List
 
 	maxSize int
 	loader  LoaderFunc[Key, Value]
@@ -120,40 +116,44 @@ func (c *Cache[Key, Value]) Has(key Key) bool {
 }
 
 func (c *Cache[Key, Value]) Keys() []Key {
-	return maps.Keys(c.nonExpiredEntries())
+	entries := c.nonExpiredEntries()
+	if c.maxSize > 0 {
+		keys := make([]Key, 0, len(entries))
+		for e := c.entryQueue.Front(); e != nil; e = e.Next() {
+			entry := e.Value.(*cacheEntry[Key, Value])
+			if !entry.isExpired() {
+				keys = append(keys, entry.key)
+			}
+		}
+		return keys
+	}
+	return maps.Keys(entries)
 }
 
 func (c *Cache[Key, Value]) Put(key Key, value Value) {
 	entry := c.newEntry(key, value)
 
-	// if c.maxSize > 0 && len(c.keys) == c.maxSize {
-	// 	c.mu.Lock()
-	// 	firstKey := c.keys[0]
-
-	// 	delete(c.entries, firstKey)
-	// 	c.keys = c.keys[1:]
-	// 	c.keys = append(c.keys, entry.key)
-	// 	c.mu.Unlock()
-	// }
+	if c.maxSize > 0 {
+		if c.entryQueue.Len() == c.maxSize {
+			e := c.dequeueSafe()
+			c.removeSafe(e.Value.(*cacheEntry[Key, Value]).key)
+		}
+		c.entryQueue.PushBack(entry)
+	}
 
 	c.putSafe(entry)
 }
 
-func (c *Cache[Key, Value]) Reload(key Key) (Value, bool, error) {
-	if c.loader == nil {
-		var val Value
-		return val, false, fmt.Errorf("cache doesn't contain a loader function")
-	}
-
-	entry, found := c.getSafe(key)
-	if found && !entry.isExpired() {
-		entry.expiration = time.Now().Add(-1 * c.expireAfterWrite)
-		c.putSafe(entry)
-	}
-	return c.Get(key)
-}
-
 func (c *Cache[Key, Value]) Remove(key Key) {
+	if c.maxSize > 0 {
+		for e := c.entryQueue.Front(); e != nil; e = e.Next() {
+			entry := e.Value.(*cacheEntry[Key, Value])
+			if entry.key == key {
+				c.entryQueue.Remove(e)
+				break
+			}
+		}
+	}
 	c.removeSafe(key)
 }
 
@@ -216,16 +216,19 @@ func WithMaxSize[Key comparable, Value any](
 	maxSize int,
 ) Option[Key, Value] {
 	return func(c *Cache[Key, Value]) {
+		c.entries = make(map[Key]*cacheEntry[Key, Value], maxSize)
 		c.maxSize = maxSize
-		c.keys = make([]Key, maxSize)
+		c.entryQueue = list.New()
 	}
 }
 
 func (c *Cache[Key, Value]) newEntry(key Key, value Value) *cacheEntry[Key, Value] {
 	var expiration time.Time
+
 	if c.expireAfterWrite > 0 {
 		expiration = time.Now().Add(c.expireAfterWrite)
 	}
+
 	return &cacheEntry[Key, Value]{key, value, expiration}
 }
 
@@ -249,7 +252,7 @@ func (c *Cache[Key, Value]) cleanup() {
 	for _, key := range keys {
 		entry, found := c.getSafe(key)
 		if found && entry.isExpired() {
-			c.removeSafe(key)
+			c.Remove(key)
 			if c.onExpired != nil {
 				c.onExpired(entry.key, entry.value)
 			}
@@ -285,4 +288,10 @@ func (c *Cache[Key, Value]) removeSafe(key Key) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.entries, key)
+}
+
+func (c *Cache[Key, Value]) dequeueSafe() *list.Element {
+	e := c.entryQueue.Front()
+	c.entryQueue.Remove(e)
+	return e
 }

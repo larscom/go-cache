@@ -44,6 +44,8 @@ With `loader` function
 
 > This function gets called whenever the requested key is not available in the cache and will update the cache automatically with the value returned from the loader function.
 
+> Note: this function will only get called once if called from multiple go routines at the same time.
+
 ```go
 func main() {
     // this loader function gets only called once, even when calling from multiple go routines
