@@ -291,6 +291,8 @@ func (c *Cache[Key, Value]) removeSafe(key Key) {
 }
 
 func (c *Cache[Key, Value]) dequeueSafe() *list.Element {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	e := c.entryQueue.Front()
 	c.entryQueue.Remove(e)
 	return e
