@@ -3,6 +3,7 @@ package cache
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,41 +14,35 @@ func createCache(options ...Option[int, int]) ICache[int, int] {
 	return NewCache(options...)
 }
 
-func Test_Default(t *testing.T) {
-	t.Run("should clear the whole map", func(t *testing.T) {
-		cache := createCache()
+func Test_Core(t *testing.T) {
+	t.Run("clear", func(t *testing.T) {
+		c := createCache()
+		c.Put(1, 1)
+		c.Put(2, 2)
 
-		cache.Put(1, 1)
-		cache.Put(2, 2)
-		cache.Put(3, 3)
+		assert.Equal(t, 2, c.Count())
 
-		assert.Equal(t, 3, cache.Count())
+		c.Clear()
 
-		cache.Clear()
-
-		assert.Zero(t, cache.Count())
+		assert.Zero(t, c.Count())
 	})
-
-	t.Run("should not panic when calling close", func(t *testing.T) {
-		cache := createCache()
+	t.Run("close", func(t *testing.T) {
+		c := createCache()
 		assert.NotPanics(t, func() {
-			cache.Close()
+			c.Close()
 		})
 	})
-
-	t.Run("should count total size of the cache", func(t *testing.T) {
+	t.Run("count", func(t *testing.T) {
 		cache := createCache()
 
 		assert.Zero(t, cache.Count())
 
 		cache.Put(1, 1)
 		cache.Put(2, 2)
-		cache.Put(3, 3)
 
-		assert.Equal(t, 3, cache.Count())
+		assert.Equal(t, 2, cache.Count())
 	})
-
-	t.Run("should be able to loop over the cache entries with the for each function", func(t *testing.T) {
+	t.Run("forEach", func(t *testing.T) {
 		cache := createCache()
 		keys := []int{1, 2, 3}
 
@@ -60,19 +55,14 @@ func Test_Default(t *testing.T) {
 			assert.Equal(t, key+1, value)
 		})
 	})
-
-	t.Run("should be able to call get when the key doesnt exist", func(t *testing.T) {
+	t.Run("get zero", func(t *testing.T) {
 		cache := createCache()
-		const key = 1
-
-		val, found, err := cache.Get(key)
-
+		val, found, err := cache.Get(1)
 		assert.Zero(t, val)
 		assert.False(t, found)
 		assert.NoError(t, err)
 	})
-
-	t.Run("should get value from cache", func(t *testing.T) {
+	t.Run("get value", func(t *testing.T) {
 		cache := createCache()
 		const key = 1
 
@@ -83,26 +73,30 @@ func Test_Default(t *testing.T) {
 		assert.True(t, found)
 		assert.NoError(t, err)
 	})
-
-	t.Run("has function should return false when cache doesnt contain key", func(t *testing.T) {
+	t.Run("has not", func(t *testing.T) {
 		cache := createCache()
-		const key = 1
-		found := cache.Has(key)
+		has := cache.Has(1)
 
-		assert.False(t, found)
+		assert.False(t, has)
 	})
 
-	t.Run("has function should return true when cache contains key", func(t *testing.T) {
+	t.Run("has", func(t *testing.T) {
 		cache := createCache()
 		const key = 1
 
 		cache.Put(key, 100)
-		found := cache.Has(key)
+		has := cache.Has(key)
 
-		assert.True(t, found)
+		assert.True(t, has)
 	})
+	t.Run("keys", func(t *testing.T) {
+		cache := createCache()
+		cache.Put(1, 100)
+		cache.Put(2, 100)
 
-	t.Run("should be able to put a new value into the cache", func(t *testing.T) {
+		assert.ElementsMatch(t, []int{1, 2}, cache.Keys())
+	})
+	t.Run("put", func(t *testing.T) {
 		cache := createCache()
 		const key = 1
 
@@ -115,42 +109,29 @@ func Test_Default(t *testing.T) {
 		assert.True(t, found)
 		assert.NoError(t, err)
 	})
-
-	t.Run("should be able to call reload without loader function and receive an error", func(t *testing.T) {
+	t.Run("reload error", func(t *testing.T) {
 		cache := createCache()
-
 		val, ok, err := cache.Reload(1)
 
 		assert.Zero(t, val)
 		assert.False(t, ok)
 		assert.Error(t, err)
-		assert.Equal(t, fmt.Errorf("Cache doesn't contain a loader function"), err)
+		assert.Equal(t, fmt.Errorf("cache doesn't contain a loader function"), err)
 	})
-
-	t.Run("should be able to call remove on a key that doesnt exist", func(t *testing.T) {
-		cache := createCache()
-		assert.NotPanics(t, func() {
-			cache.Remove(1)
-		})
-	})
-
-	t.Run("should be able to remove a key/value from cache", func(t *testing.T) {
+	t.Run("remove", func(t *testing.T) {
 		cache := createCache()
 		const key = 1
-
 		{
 			cache.Put(key, 100)
-			found := cache.Has(key)
-			assert.True(t, found)
+			has := cache.Has(key)
+			assert.True(t, has)
 		}
-
 		cache.Remove(key)
 
-		found := cache.Has(key)
-		assert.False(t, found)
+		has := cache.Has(key)
+		assert.False(t, has)
 	})
-
-	t.Run("should get back a map implementation", func(t *testing.T) {
+	t.Run("toMap", func(t *testing.T) {
 		cache := createCache()
 		cache.Put(1, 100)
 		cache.Put(2, 200)
@@ -166,117 +147,242 @@ func Test_Default(t *testing.T) {
 		}
 	})
 
-	t.Run("should be able to get all keys from cache", func(t *testing.T) {
-		cache := createCache()
-		cache.Put(1, 100)
-		cache.Put(2, 100)
-		cache.Put(3, 100)
-
-		assert.ElementsMatch(t, []int{1, 2, 3}, cache.Keys())
-	})
-
-	t.Run("should be able to get all values from cache", func(t *testing.T) {
+	t.Run("values", func(t *testing.T) {
 		cache := createCache()
 		cache.Put(1, 100)
 		cache.Put(2, 200)
-		cache.Put(3, 300)
 
-		assert.ElementsMatch(t, []int{100, 200, 300}, cache.Values())
+		assert.ElementsMatch(t, []int{100, 200}, cache.Values())
 	})
 }
 
-func Test_With_Loader(t *testing.T) {
+func Test_WithExpireAfterWrite(t *testing.T) {
+	t.Run("count", func(t *testing.T) {
+		ttl := time.Millisecond * 10
+		c := createCache(WithExpireAfterWrite[int, int](ttl))
+		c.Put(1, 100)
 
-	t.Run("should only call loader once from multiple go routines when invoking Get", func(t *testing.T) {
+		<-time.After(time.Millisecond * 15)
+		c.Put(2, 200)
+
+		assert.Equal(t, 1, c.Count())
+	})
+	t.Run("forEach", func(t *testing.T) {
+		ttl := time.Millisecond * 10
+		c := createCache(WithExpireAfterWrite[int, int](ttl))
+		c.Put(1, 100)
+
+		<-time.After(time.Millisecond * 15)
+		c.Put(2, 200)
+
 		var wg sync.WaitGroup
 		wg.Add(1)
-		cache := createCache(WithLoader(func(key int) (int, error) {
-			defer wg.Done()
-			time.Sleep(time.Millisecond * 25)
-			return 12345, nil
-		}))
 
-		go func() {
-			cache.Get(1)
-		}()
-		go func() {
-			cache.Get(1)
-		}()
-		go func() {
-			cache.Get(1)
-		}()
-
-		<-time.After(time.Millisecond * 35)
+		c.ForEach(func(key, value int) {
+			assert.Equal(t, 2, key)
+			assert.Equal(t, 200, value)
+			wg.Done()
+		})
 
 		wg.Wait()
 	})
+	t.Run("get", func(t *testing.T) {
+		ttl := time.Millisecond * 10
+		c := createCache(WithExpireAfterWrite[int, int](ttl))
 
-	t.Run("should only call loader once from multiple go routines when invoking Reload", func(t *testing.T) {
-		var wg sync.WaitGroup
-		wg.Add(1)
-		cache := createCache(WithLoader(func(key int) (int, error) {
-			defer wg.Done()
-			time.Sleep(time.Millisecond * 25)
-			return 12345, nil
-		}))
+		const key = 1
+		c.Put(key, 100)
 
-		go func() {
-			cache.Reload(1)
-		}()
-		go func() {
-			cache.Reload(1)
-		}()
-		go func() {
-			cache.Reload(1)
-		}()
+		v, found, err := c.Get(key)
 
-		<-time.After(time.Millisecond * 35)
-
-		wg.Wait()
-	})
-
-	t.Run("should get value from loader when not in cache", func(t *testing.T) {
-		cache := createCache(WithLoader(func(key int) (int, error) {
-			return 12345, nil
-		}))
-
-		value, found, err := cache.Get(1)
-
-		assert.Equal(t, 12345, value)
+		assert.Equal(t, 100, v)
 		assert.True(t, found)
 		assert.NoError(t, err)
 	})
+	t.Run("get is expired", func(t *testing.T) {
+		ttl := time.Millisecond * 10
+		c := createCache(WithExpireAfterWrite[int, int](ttl))
 
-	t.Run("should get value from cache when present", func(t *testing.T) {
-		cache := createCache(WithLoader(func(key int) (int, error) {
+		const key = 1
+		c.Put(key, 100)
+
+		<-time.After(time.Millisecond * 15)
+
+		v, found, err := c.Get(key)
+
+		assert.Zero(t, v)
+		assert.False(t, found)
+		assert.NoError(t, err)
+	})
+	t.Run("has", func(t *testing.T) {
+		ttl := time.Millisecond * 10
+		c := createCache(WithExpireAfterWrite[int, int](ttl))
+
+		c.Put(1, 100)
+		<-time.After(time.Millisecond * 15)
+		has := c.Has(1)
+		assert.False(t, has)
+	})
+	t.Run("keys", func(t *testing.T) {
+		ttl := time.Millisecond * 10
+		c := createCache(WithExpireAfterWrite[int, int](ttl))
+
+		c.Put(1, 100)
+
+		<-time.After(time.Millisecond * 15)
+		c.Put(2, 200)
+		c.Put(3, 300)
+
+		assert.ElementsMatch(t, []int{2, 3}, c.Keys())
+	})
+	t.Run("toMap", func(t *testing.T) {
+		ttl := time.Millisecond * 10
+		c := createCache(WithExpireAfterWrite[int, int](ttl))
+
+		c.Put(1, 100)
+
+		<-time.After(time.Millisecond * 15)
+		c.Put(2, 200)
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+
+		m := c.ToMap()
+		for key, value := range m {
+			assert.Equal(t, 2, key)
+			assert.Equal(t, 200, value)
+			wg.Done()
+		}
+
+		wg.Wait()
+	})
+	t.Run("values", func(t *testing.T) {
+		ttl := time.Millisecond * 10
+		c := createCache(WithExpireAfterWrite[int, int](ttl))
+
+		c.Put(1, 100)
+
+		<-time.After(time.Millisecond * 15)
+		c.Put(2, 200)
+		c.Put(3, 300)
+
+		assert.ElementsMatch(t, []int{200, 300}, c.Values())
+	})
+}
+
+func Test_Expiration(t *testing.T) {
+	t.Run("onExpired", func(t *testing.T) {
+		ttl := time.Millisecond * 10
+		cleanupInterval := time.Millisecond * 5
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+
+		expiredFunc := func(key, value int) {
+			assert.Equal(t, 1, key)
+			assert.Equal(t, 100, value)
+			wg.Done()
+		}
+		c := createCache(WithExpireAfterWriteCustom[int, int](ttl, cleanupInterval), WithOnExpired(expiredFunc))
+
+		c.Put(1, 100)
+
+		<-time.After(time.Millisecond * 15)
+
+		wg.Wait()
+	})
+	t.Run("close triggers cleanup", func(t *testing.T) {
+		ttl := time.Millisecond * 10
+		cleanupInterval := time.Millisecond * 500
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+
+		expiredFunc := func(key, value int) {
+			assert.Equal(t, 1, key)
+			assert.Equal(t, 100, value)
+			wg.Done()
+		}
+
+		c := createCache(WithExpireAfterWriteCustom[int, int](ttl, cleanupInterval), WithOnExpired(expiredFunc))
+
+		c.Put(1, 100)
+
+		<-time.After(time.Millisecond * 15)
+
+		c.Close()
+
+		wg.Wait()
+	})
+}
+
+func Test_WithLoader(t *testing.T) {
+	t.Run("get from loader", func(t *testing.T) {
+		c := createCache(WithLoader(func(key int) (int, error) {
+			return 12345, nil
+		}))
+
+		value, ok, err := c.Get(1)
+
+		assert.Equal(t, 12345, value)
+		assert.True(t, ok)
+		assert.NoError(t, err)
+	})
+	t.Run("get from cache", func(t *testing.T) {
+		c := createCache(WithLoader(func(key int) (int, error) {
 			return 12345, nil
 		}))
 
 		const key = 1
+		c.Put(key, 100)
 
-		cache.Put(key, 100)
-
-		value, found, err := cache.Get(key)
+		value, ok, err := c.Get(key)
 
 		assert.Equal(t, 100, value)
-		assert.True(t, found)
+		assert.True(t, ok)
 		assert.NoError(t, err)
 	})
-
-	t.Run("should get error from loader", func(t *testing.T) {
-		cache := createCache(WithLoader(func(key int) (int, error) {
+	t.Run("get loader error", func(t *testing.T) {
+		c := createCache(WithLoader(func(key int) (int, error) {
 			return 0, fmt.Errorf("ERROR")
 		}))
 
-		value, found, err := cache.Get(1)
+		value, found, err := c.Get(1)
 
 		assert.False(t, found)
 		assert.Error(t, err)
 		assert.Equal(t, fmt.Errorf("ERROR"), err)
 		assert.Zero(t, value)
 	})
+	t.Run("call loader once per key", func(t *testing.T) {
+		var counter int32
+		cache := createCache(WithLoader(func(key int) (int, error) {
+			atomic.AddInt32(&counter, 1)
+			time.Sleep(time.Millisecond * 10)
+			return 12345, nil
+		}))
 
-	t.Run("should reload value with loader", func(t *testing.T) {
+		go func() {
+			cache.Get(1)
+		}()
+		go func() {
+			cache.Get(1)
+		}()
+
+		go func() {
+			cache.Get(2)
+		}()
+		go func() {
+			cache.Get(2)
+		}()
+
+		<-time.After(time.Millisecond * 15)
+
+		r := atomic.LoadInt32(&counter)
+
+		assert.Equal(t, 2, int(r))
+	})
+	t.Run("reload", func(t *testing.T) {
 		cache := createCache(WithLoader(func(key int) (int, error) {
 			return 12345, nil
 		}))
@@ -297,199 +403,31 @@ func Test_With_Loader(t *testing.T) {
 
 		assert.Equal(t, 12345, value)
 	})
-}
+	t.Run("call reload once per key", func(t *testing.T) {
+		var counter int32
+		cache := createCache(WithLoader(func(key int) (int, error) {
+			atomic.AddInt32(&counter, 1)
+			time.Sleep(time.Millisecond * 10)
+			return 12345, nil
+		}))
 
-func Test_With_ExpireAfterWrite(t *testing.T) {
-
-	t.Run("should get value before expiring", func(t *testing.T) {
-		ttl := WithExpireAfterWrite[int, int](50 * time.Millisecond)
-		cache := createCache(ttl)
-
-		const key = 1
-
-		cache.Put(key, 100)
-
-		<-time.After(25 * time.Millisecond)
-
-		value, found, err := cache.Get(key)
-
-		assert.Equal(t, 100, value)
-		assert.True(t, found)
-		assert.NoError(t, err)
-	})
-
-	t.Run("should not get value because it is epired", func(t *testing.T) {
-		ttl := WithExpireAfterWrite[int, int](25 * time.Millisecond)
-		cache := createCache(ttl)
-
-		const key = 1
-
-		cache.Put(key, 100)
-
-		<-time.After(35 * time.Millisecond)
-
-		value, found, err := cache.Get(key)
-
-		assert.Zero(t, value)
-		assert.False(t, found)
-		assert.NoError(t, err)
-	})
-
-	t.Run("expire time should count since last item was added", func(t *testing.T) {
-		ttl := WithExpireAfterWrite[int, int](25 * time.Millisecond)
-		cache := createCache(ttl)
-
-		const key = 1
-
-		n := 25
-		for i := 0; i <= n; i++ {
-			time.Sleep(time.Millisecond * 5)
-			cache.Put(key, i)
-		}
+		go func() {
+			cache.Reload(1)
+		}()
+		go func() {
+			cache.Reload(1)
+		}()
+		go func() {
+			cache.Reload(2)
+		}()
+		go func() {
+			cache.Reload(2)
+		}()
 
 		<-time.After(time.Millisecond * 15)
 
-		actual, _, _ := cache.Get(key)
+		r := atomic.LoadInt32(&counter)
 
-		assert.Equal(t, n, actual)
-	})
-
-	t.Run("should clear the whole cache and cancel current entries", func(t *testing.T) {
-		ttl := WithExpireAfterWrite[int, int](50 * time.Millisecond)
-		cache := createCache(ttl)
-
-		n := 5
-		for i := 0; i < n; i++ {
-			cache.Put(i, i)
-		}
-
-		<-time.After(15 * time.Millisecond)
-
-		assert.Equal(t, n, cache.Count())
-
-		cache.Clear()
-
-		assert.Zero(t, cache.Count())
-
-		cache.Put(n, 100)
-
-		<-time.After(40 * time.Millisecond)
-
-		actual, _, _ := cache.Get(n)
-
-		assert.Equal(t, 100, actual)
-	})
-
-	t.Run("should remove from cache and cancel the current entry", func(t *testing.T) {
-		ttl := WithExpireAfterWrite[int, int](50 * time.Millisecond)
-		cache := createCache(ttl)
-
-		cache.Put(1, 1)
-
-		assert.Equal(t, 1, cache.Count())
-
-		cache.Remove(1)
-
-		<-time.After(40 * time.Millisecond)
-
-		assert.Zero(t, cache.Count())
-
-		cache.Put(1, 100)
-
-		<-time.After(40 * time.Millisecond)
-
-		actual, _, _ := cache.Get(1)
-
-		assert.Equal(t, 100, actual)
-	})
-
-	t.Run("should close context and stop current entries from expiring", func(t *testing.T) {
-		ttl := WithExpireAfterWrite[int, int](50 * time.Millisecond)
-		cache := createCache(ttl)
-
-		n := 50
-		for i := 0; i < n; i++ {
-			cache.Put(i, i)
-		}
-
-		assert.Equal(t, n, cache.Count())
-
-		cache.Close()
-
-		<-time.After(100 * time.Millisecond)
-
-		assert.Equal(t, n, cache.Count())
-	})
-}
-
-func Test_With_OnExpired(t *testing.T) {
-
-	t.Run("should call function when expired and receive the key,value", func(t *testing.T) {
-
-		var wg sync.WaitGroup
-		wg.Add(1)
-
-		onExpired := WithOnExpired(func(key int, value int) {
-			defer wg.Done()
-			assert.Equal(t, 1, key)
-			assert.Equal(t, 100, value)
-		})
-
-		ttl := WithExpireAfterWrite[int, int](25 * time.Millisecond)
-
-		cache := createCache(ttl, onExpired)
-		cache.Put(1, 100)
-
-		<-time.After(35 * time.Millisecond)
-
-		wg.Wait()
-	})
-}
-
-func Test_With_MaxSize(t *testing.T) {
-
-	t.Run("should get keys in order", func(t *testing.T) {
-
-		cache := createCache(WithMaxSize[int, int](3))
-		cache.Put(1, 100)
-		cache.Put(2, 200)
-		cache.Put(3, 300)
-		cache.Put(4, 400)
-
-		for i := 0; i < 50; i++ {
-			assert.Equal(t, []int{2, 3, 4}, cache.Keys())
-		}
-
-	})
-
-	t.Run("should remove the first key if going above max size", func(t *testing.T) {
-
-		cache := createCache(WithMaxSize[int, int](3))
-		cache.Put(1, 100)
-		cache.Put(2, 200)
-		cache.Put(3, 300)
-		cache.Put(4, 400)
-
-		assert.Equal(t, 3, cache.Count())
-		assert.ElementsMatch(t, []int{2, 3, 4}, cache.Keys())
-	})
-
-	t.Run("should cancel expire and then remove first key if TTL is enabled", func(t *testing.T) {
-		var wg sync.WaitGroup
-		wg.Add(1)
-
-		ttl := WithExpireAfterWrite[int, int](20 * time.Millisecond)
-		cache := createCache(ttl, WithMaxSize[int, int](1), WithOnExpired(func(key, value int) {
-			defer wg.Done()
-			assert.Equal(t, 2, key)
-			assert.Equal(t, 200, value)
-		}))
-
-		cache.Put(1, 100)
-		cache.Put(2, 200)
-
-		<-time.After(time.Millisecond * 30)
-
-		wg.Wait()
+		assert.Equal(t, 2, int(r))
 	})
 }

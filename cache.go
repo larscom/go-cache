@@ -46,78 +46,63 @@ type ICache[Key comparable, Value any] interface {
 }
 
 type Cache[Key comparable, Value any] struct {
-	data map[Key]*cacheEntry[Key, Value]
-	keys []Key
+	entries map[Key]*cacheEntry[Key, Value]
+	keys    []Key
 
-	maxSize     int
-	withMaxSize bool
+	maxSize int
+	loader  LoaderFunc[Key, Value]
 
-	loader     LoaderFunc[Key, Value]
-	withLoader bool
-
-	keyedMutex KeyedMutex[Key]
-
-	onExpired        func(Key, Value)
 	expireAfterWrite time.Duration
+	onExpired        func(Key, Value)
 
-	mu sync.RWMutex
+	mu      sync.RWMutex
+	keyedMu keyedMutex[Key]
 
-	rootCtx  context.Context
-	closeCtx context.CancelFunc
-
+	cancel context.CancelFunc
 	ticker *ticker
 }
 
 func NewCache[Key comparable, Value any](
 	options ...Option[Key, Value],
 ) ICache[Key, Value] {
-	ctx, cancel := context.WithCancel(context.Background())
 	c := &Cache[Key, Value]{
-		data:     make(map[Key]*cacheEntry[Key, Value]),
-		rootCtx:  ctx,
-		closeCtx: cancel,
-		ticker:   newTicker(ctx, time.Second*5),
+		entries: make(map[Key]*cacheEntry[Key, Value]),
 	}
 	for _, opt := range options {
 		opt(c)
 	}
-	c.ticker.start(c.cleanup)
 	return c
 }
 
 func (c *Cache[Key, Value]) Clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.data = make(map[Key]*cacheEntry[Key, Value])
+	c.entries = make(map[Key]*cacheEntry[Key, Value])
 }
 
 func (c *Cache[Key, Value]) Close() {
-	c.closeCtx()
+	if c.cancel != nil {
+		c.cancel()
+	}
 }
 
 func (c *Cache[Key, Value]) Count() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return len(c.data)
+	return len(c.nonExpiredEntries())
 }
 
 func (c *Cache[Key, Value]) ForEach(fn func(Key, Value)) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	for key, entry := range c.data {
+	for key, entry := range c.nonExpiredEntries() {
 		fn(key, entry.value)
 	}
 }
 
 func (c *Cache[Key, Value]) Get(key Key) (Value, bool, error) {
-	unlock := c.keyedMutex.lock(key)
+	unlock := c.keyedMu.lock(key)
+	defer unlock()
 
 	entry, found := c.getSafe(key)
-	if found && !entry.isExpired(c.expireAfterWrite) {
-		unlock()
+	if found && !entry.isExpired() {
 		return entry.value, true, nil
-	} else {
-		defer unlock()
 	}
 
 	value, ok, err := c.load(key)
@@ -130,42 +115,41 @@ func (c *Cache[Key, Value]) Get(key Key) (Value, bool, error) {
 }
 
 func (c *Cache[Key, Value]) Has(key Key) bool {
-	_, found := c.getSafe(key)
-	return found
+	entry, found := c.getSafe(key)
+	return found && !entry.isExpired()
 }
 
 func (c *Cache[Key, Value]) Keys() []Key {
-	if c.withMaxSize {
-		return c.keys
-	}
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return maps.Keys(c.data)
+	return maps.Keys(c.nonExpiredEntries())
 }
 
 func (c *Cache[Key, Value]) Put(key Key, value Value) {
 	entry := c.newEntry(key, value)
 
-	if c.withMaxSize && len(c.keys) == c.maxSize {
-		c.mu.Lock()
-		firstKey := c.keys[0]
+	// if c.maxSize > 0 && len(c.keys) == c.maxSize {
+	// 	c.mu.Lock()
+	// 	firstKey := c.keys[0]
 
-		delete(c.data, firstKey)
-		c.keys = c.keys[1:]
-		c.keys = append(c.keys, entry.key)
-		c.mu.Unlock()
-	}
+	// 	delete(c.entries, firstKey)
+	// 	c.keys = c.keys[1:]
+	// 	c.keys = append(c.keys, entry.key)
+	// 	c.mu.Unlock()
+	// }
 
 	c.putSafe(entry)
 }
 
 func (c *Cache[Key, Value]) Reload(key Key) (Value, bool, error) {
-	if !c.withLoader {
+	if c.loader == nil {
 		var val Value
-		return val, false, fmt.Errorf("Cache doesn't contain a loader function")
+		return val, false, fmt.Errorf("cache doesn't contain a loader function")
 	}
 
-	c.Remove(key)
+	entry, found := c.getSafe(key)
+	if found && !entry.isExpired() {
+		entry.expiration = time.Now().Add(-1 * c.expireAfterWrite)
+		c.putSafe(entry)
+	}
 	return c.Get(key)
 }
 
@@ -174,20 +158,15 @@ func (c *Cache[Key, Value]) Remove(key Key) {
 }
 
 func (c *Cache[Key, Value]) ToMap() map[Key]Value {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
 	m := make(map[Key]Value)
-	for key, entry := range c.data {
+	for key, entry := range c.nonExpiredEntries() {
 		m[key] = entry.value
 	}
 	return m
 }
 
 func (c *Cache[Key, Value]) Values() []Value {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	entries := maps.Values(c.data)
+	entries := maps.Values(c.nonExpiredEntries())
 	n := len(entries)
 	values := make([]Value, n)
 	for i := 0; i < n; i++ {
@@ -199,8 +178,21 @@ func (c *Cache[Key, Value]) Values() []Value {
 func WithExpireAfterWrite[Key comparable, Value any](
 	expireAfterWrite time.Duration,
 ) Option[Key, Value] {
+	return WithExpireAfterWriteCustom[Key, Value](expireAfterWrite, time.Minute)
+}
+
+func WithExpireAfterWriteCustom[Key comparable, Value any](
+	expireAfterWrite time.Duration,
+	cleanupInterval time.Duration,
+) Option[Key, Value] {
 	return func(c *Cache[Key, Value]) {
 		c.expireAfterWrite = expireAfterWrite
+		if c.ticker == nil {
+			ctx, cancel := context.WithCancel(context.Background())
+			c.cancel = cancel
+			c.ticker = newTicker(ctx, cleanupInterval)
+			c.ticker.start(c.cleanup)
+		}
 	}
 }
 
@@ -209,7 +201,6 @@ func WithLoader[Key comparable, Value any](
 ) Option[Key, Value] {
 	return func(c *Cache[Key, Value]) {
 		c.loader = loader
-		c.withLoader = loader != nil
 	}
 }
 
@@ -226,54 +217,48 @@ func WithMaxSize[Key comparable, Value any](
 ) Option[Key, Value] {
 	return func(c *Cache[Key, Value]) {
 		c.maxSize = maxSize
-		c.withMaxSize = maxSize > 0
 		c.keys = make([]Key, maxSize)
 	}
 }
 
-/*
- * @Internal
- */
-
-type cacheEntry[Key comparable, Value any] struct {
-	key     Key
-	value   Value
-	updated time.Time
-}
-
 func (c *Cache[Key, Value]) newEntry(key Key, value Value) *cacheEntry[Key, Value] {
-	updated := time.Now()
-	return &cacheEntry[Key, Value]{key, value, updated}
+	var expiration time.Time
+	if c.expireAfterWrite > 0 {
+		expiration = time.Now().Add(c.expireAfterWrite)
+	}
+	return &cacheEntry[Key, Value]{key, value, expiration}
 }
 
-func (e *cacheEntry[Key, Value]) isExpired(expireAfterWrite time.Duration) bool {
-	if expireAfterWrite > 0 {
-		now := time.Now()
-		return now.Sub(e.updated) > expireAfterWrite
+func (c *Cache[Key, Value]) nonExpiredEntries() map[Key]*cacheEntry[Key, Value] {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	e := make(map[Key]*cacheEntry[Key, Value])
+	for key, entry := range c.entries {
+		if !entry.isExpired() {
+			e[key] = entry
+		}
 	}
-	return false
+	return e
 }
 
 func (c *Cache[Key, Value]) cleanup() {
-	keys := c.Keys()
+	c.mu.RLock()
+	keys := maps.Keys(c.entries)
+	c.mu.RUnlock()
 
 	for _, key := range keys {
 		entry, found := c.getSafe(key)
-		if found && entry.isExpired(c.expireAfterWrite) {
+		if found && entry.isExpired() {
 			c.removeSafe(key)
 			if c.onExpired != nil {
 				c.onExpired(entry.key, entry.value)
 			}
 		}
 	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 }
 
 func (c *Cache[Key, Value]) load(key Key) (Value, bool, error) {
-	if !c.withLoader {
+	if c.loader == nil {
 		var val Value
 		return val, false, nil
 	}
@@ -286,18 +271,18 @@ func (c *Cache[Key, Value]) load(key Key) (Value, bool, error) {
 func (c *Cache[Key, Value]) getSafe(key Key) (*cacheEntry[Key, Value], bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	entry, found := c.data[key]
+	entry, found := c.entries[key]
 	return entry, found
 }
 
 func (c *Cache[Key, Value]) putSafe(entry *cacheEntry[Key, Value]) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.data[entry.key] = entry
+	c.entries[entry.key] = entry
 }
 
 func (c *Cache[Key, Value]) removeSafe(key Key) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	delete(c.data, key)
+	delete(c.entries, key)
 }
