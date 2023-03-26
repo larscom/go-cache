@@ -89,13 +89,21 @@ func Test_Core(t *testing.T) {
 		assert.Zero(t, val)
 		assert.False(t, found)
 	})
+	t.Run("refresh without loader", func(t *testing.T) {
+		cache := createCache()
+
+		val, ok, err := cache.Refresh(1)
+
+		assert.Zero(t, val)
+		assert.False(t, ok)
+		assert.NoError(t, err)
+	})
 	t.Run("has not", func(t *testing.T) {
 		cache := createCache()
 		has := cache.Has(1)
 
 		assert.False(t, has)
 	})
-
 	t.Run("has", func(t *testing.T) {
 		cache := createCache()
 		const key = 1
@@ -414,5 +422,77 @@ func Test_WithLoader(t *testing.T) {
 
 		assert.Equal(t, 2, int(r))
 	})
+	t.Run("call loader once per key for refresh", func(t *testing.T) {
+		var counter int32
+		cache := createCache(WithLoader(func(key int) (int, error) {
+			atomic.AddInt32(&counter, 1)
+			time.Sleep(time.Millisecond * 10)
+			return 12345, nil
+		}))
 
+		go func() {
+			cache.Refresh(1)
+		}()
+		go func() {
+			cache.Refresh(1)
+		}()
+
+		go func() {
+			cache.Refresh(2)
+		}()
+		go func() {
+			cache.Refresh(2)
+		}()
+
+		<-time.After(time.Millisecond * 15)
+
+		r := atomic.LoadInt32(&counter)
+
+		assert.Equal(t, 2, int(r))
+	})
+	t.Run("refresh", func(t *testing.T) {
+		cache := createCache(WithLoader(func(key int) (int, error) {
+			return 12345, nil
+		}))
+
+		const key = 1
+
+		cache.Put(key, 100)
+
+		value, _, _ := cache.Get(key)
+		assert.Equal(t, 100, value)
+
+		value, ok, err := cache.Refresh(key)
+		assert.True(t, ok)
+		assert.NoError(t, err)
+		assert.Equal(t, 12345, value)
+
+		value, _, _ = cache.Get(key)
+
+		assert.Equal(t, 12345, value)
+	})
+
+	t.Run("refresh no update on error", func(t *testing.T) {
+		cache := createCache(WithLoader(func(key int) (int, error) {
+			return 0, fmt.Errorf("ERROR")
+		}))
+
+		const key = 1
+
+		cache.Put(key, 100)
+
+		value, _, _ := cache.Get(key)
+		assert.Equal(t, 100, value)
+
+		value, ok, err := cache.Refresh(key)
+		assert.Zero(t, value)
+		assert.False(t, ok)
+		assert.Error(t, err)
+		assert.Equal(t, fmt.Errorf("ERROR"), err)
+
+		value, ok, _ = cache.Get(key)
+
+		assert.True(t, ok)
+		assert.Equal(t, 100, value)
+	})
 }

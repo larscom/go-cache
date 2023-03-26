@@ -26,6 +26,8 @@ type ICache[Key comparable, Value any] interface {
 	Get(Key) (Value, bool, error)
 	// Get item from cache (if present) without loader
 	GetIfPresent(Key) (Value, bool)
+	// Refresh item in cache
+	Refresh(Key) (Value, bool, error)
 	// Check to see if the cache contains a key
 	Has(Key) bool
 	// Get all keys, it will be in indeterminate order.
@@ -47,8 +49,7 @@ type Cache[Key comparable, Value any] struct {
 	expireAfterWrite time.Duration
 	onExpired        func(Key, Value)
 
-	mu      sync.RWMutex
-	keyedMu keyedMutex[Key]
+	mu sync.RWMutex
 
 	cancel context.CancelFunc
 	ticker *ticker
@@ -89,15 +90,14 @@ func (c *Cache[Key, Value]) ForEach(fn func(Key, Value)) {
 }
 
 func (c *Cache[Key, Value]) Get(key Key) (Value, bool, error) {
-	unlock := c.keyedMu.lock(key)
-	defer unlock()
-
 	entry, found := c.GetIfPresent(key)
 	if found {
 		return entry, true, nil
 	}
 
+	c.mu.Lock()
 	value, ok, err := c.load(key)
+	c.mu.Unlock()
 
 	if ok {
 		c.Put(key, value)
@@ -115,6 +115,18 @@ func (c *Cache[Key, Value]) GetIfPresent(key Key) (Value, bool) {
 
 	var value Value
 	return value, false
+}
+
+func (c *Cache[Key, Value]) Refresh(key Key) (Value, bool, error) {
+	c.mu.Lock()
+	value, ok, err := c.load(key)
+	c.mu.Unlock()
+
+	if ok {
+		c.Put(key, value)
+	}
+
+	return value, ok, err
 }
 
 func (c *Cache[Key, Value]) Has(key Key) bool {
