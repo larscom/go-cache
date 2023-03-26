@@ -4,6 +4,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/larscom/go-cache.svg)](https://pkg.go.dev/github.com/larscom/go-cache)
 
 > Simple in-memory `thread safe` cache
+
 - With Loader (optional)
 - With TTL (optional)
 
@@ -23,22 +24,11 @@ import (
 )
 ```
 
-> Create a new cache with `int` type as key and `string` type as value. Which creates a regular cache, nothing special.
+> Create a new cache with `int` type as key and `string` type as value. Which creates a regular cache, nothing special, except that it's `thread safe`
 
 ```go
 func main() {
     c := cache.NewCache[int, string]()
-}
-```
-
-With `TTL`
-
-> Create a new cache with time to live of 10 seconds for all entries
-
-```go
-func main() {
-    c := cache.NewCache(cache.WithExpireAfterWrite[int, string](time.Second * 10))
-    defer c.Close()
 }
 ```
 
@@ -62,6 +52,17 @@ func main() {
 	})
 
     c := cache.NewCache(loader)
+}
+```
+
+With `TTL`
+
+> Create a new cache with time to live of 10 seconds for all entries
+
+```go
+func main() {
+    c := cache.NewCache(cache.WithExpireAfterWrite[int, string](time.Second * 10))
+    defer c.Close()
 }
 ```
 

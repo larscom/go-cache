@@ -130,8 +130,8 @@ func (c *Cache[Key, Value]) Refresh(key Key) (Value, bool, error) {
 }
 
 func (c *Cache[Key, Value]) Has(key Key) bool {
-	entry, found := c.getSafe(key)
-	return found && !entry.isExpired()
+	_, found := c.GetIfPresent(key)
+	return found
 }
 
 func (c *Cache[Key, Value]) Keys() []Key {
