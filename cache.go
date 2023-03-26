@@ -95,9 +95,7 @@ func (c *Cache[Key, Value]) Get(key Key) (Value, bool, error) {
 		return entry, true, nil
 	}
 
-	c.mu.Lock()
 	value, ok, err := c.load(key)
-	c.mu.Unlock()
 
 	if ok {
 		c.Put(key, value)
@@ -118,9 +116,7 @@ func (c *Cache[Key, Value]) GetIfPresent(key Key) (Value, bool) {
 }
 
 func (c *Cache[Key, Value]) Refresh(key Key) (Value, bool, error) {
-	c.mu.Lock()
 	value, ok, err := c.load(key)
-	c.mu.Unlock()
 
 	if ok {
 		c.Put(key, value)
@@ -245,6 +241,9 @@ func (c *Cache[Key, Value]) load(key Key) (Value, bool, error) {
 		var val Value
 		return val, false, nil
 	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	value, err := c.loader(key)
 
