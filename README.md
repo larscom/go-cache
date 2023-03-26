@@ -3,7 +3,9 @@
 [![codecov](https://codecov.io/gh/larscom/go-cache/branch/master/graph/badge.svg?token=E9wcYNmOYN)](https://codecov.io/gh/larscom/go-cache)
 [![Go Reference](https://pkg.go.dev/badge/github.com/larscom/go-cache.svg)](https://pkg.go.dev/github.com/larscom/go-cache)
 
-> Simple in-memory `thread safe` cache with loader (optional) and TTL (optional) and max-size (optional)
+> Simple in-memory `thread safe` cache
+- With Loader (optional)
+- With TTL (optional)
 
 ## 🚀 Install
 
@@ -63,7 +65,7 @@ func main() {
 }
 ```
 
-With `onExpire` function
+With `onExpired` function
 
 > This function gets called whenever an item in the cache expires
 
