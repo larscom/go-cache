@@ -63,16 +63,6 @@ func main() {
 }
 ```
 
-With `max size`
-
-> Create a new cache with a fixed size of 300. When going beyond the max size, the first item is removed from the cache.
-
-```go
-func main() {
-    c := cache.NewCache(cache.WithMaxSize[int, int](300))
-}
-```
-
 With `onExpire` function
 
 > This function gets called whenever an item in the cache expires

@@ -62,7 +62,7 @@ func Test_Core(t *testing.T) {
 		assert.False(t, found)
 		assert.NoError(t, err)
 	})
-	t.Run("get value", func(t *testing.T) {
+	t.Run("get", func(t *testing.T) {
 		cache := createCache()
 		const key = 1
 
@@ -72,6 +72,22 @@ func Test_Core(t *testing.T) {
 		assert.Equal(t, 100, val)
 		assert.True(t, found)
 		assert.NoError(t, err)
+	})
+	t.Run("get if present", func(t *testing.T) {
+		cache := createCache()
+		const key = 1
+
+		cache.Put(key, 100)
+		val, found := cache.GetIfPresent(key)
+
+		assert.Equal(t, 100, val)
+		assert.True(t, found)
+	})
+	t.Run("get if present zero", func(t *testing.T) {
+		cache := createCache()
+		val, found := cache.GetIfPresent(1)
+		assert.Zero(t, val)
+		assert.False(t, found)
 	})
 	t.Run("has not", func(t *testing.T) {
 		cache := createCache()
@@ -137,7 +153,6 @@ func Test_Core(t *testing.T) {
 			assert.Equal(t, cachedVal, value)
 		}
 	})
-
 	t.Run("values", func(t *testing.T) {
 		cache := createCache()
 		cache.Put(1, 100)
@@ -204,6 +219,32 @@ func Test_WithExpireAfterWrite(t *testing.T) {
 		assert.Zero(t, v)
 		assert.False(t, found)
 		assert.NoError(t, err)
+	})
+	t.Run("get if present", func(t *testing.T) {
+		ttl := time.Millisecond * 10
+		c := createCache(WithExpireAfterWrite[int, int](ttl))
+
+		const key = 1
+		c.Put(key, 100)
+
+		v, found := c.GetIfPresent(key)
+
+		assert.Equal(t, 100, v)
+		assert.True(t, found)
+	})
+	t.Run("get if present is expired", func(t *testing.T) {
+		ttl := time.Millisecond * 10
+		c := createCache(WithExpireAfterWrite[int, int](ttl))
+
+		const key = 1
+		c.Put(key, 100)
+
+		<-time.After(time.Millisecond * 15)
+
+		v, found := c.GetIfPresent(key)
+
+		assert.Zero(t, v)
+		assert.False(t, found)
 	})
 	t.Run("has", func(t *testing.T) {
 		ttl := time.Millisecond * 10
@@ -372,48 +413,6 @@ func Test_WithLoader(t *testing.T) {
 		r := atomic.LoadInt32(&counter)
 
 		assert.Equal(t, 2, int(r))
-	})
-
-}
-
-func Test_WithMaxSize(t *testing.T) {
-	t.Run("put", func(t *testing.T) {
-		c := createCache(WithMaxSize[int, int](3))
-		c.Put(1, 100)
-		c.Put(2, 200)
-		c.Put(3, 300)
-		c.Put(4, 400)
-
-		assert.Equal(t, 3, c.Count())
-		assert.ElementsMatch(t, []int{2, 3, 4}, c.Keys())
-	})
-
-	t.Run("remove", func(t *testing.T) {
-		c := createCache(WithMaxSize[int, int](3))
-		c.Put(1, 100)
-		c.Put(2, 200)
-		c.Put(3, 300)
-
-		c.Remove(2)
-
-		c.Put(2, 202)
-		c.Put(4, 400)
-
-		vals := c.Values()
-		keys := c.Keys()
-
-		assert.Len(t, vals, 3)
-		assert.Len(t, keys, 3)
-		assert.Equal(t, []int{3, 2, 4}, keys)
-
-		val, _, _ := c.Get(3)
-		assert.Equal(t, 300, val)
-
-		val, _, _ = c.Get(2)
-		assert.Equal(t, 202, val)
-
-		val, _, _ = c.Get(4)
-		assert.Equal(t, 400, val)
 	})
 
 }

@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"container/list"
 	"context"
 	"sync"
 	"time"
@@ -22,14 +21,14 @@ type ICache[Key comparable, Value any] interface {
 	Count() int
 	// Loop over each entry in the cache
 	ForEach(func(Key, Value))
-	// If cache is created with 'WithLoader' it'll use the loader function to get
-	// an item and put it in the cache.
-	// The loader function is only ever called once, even if it's called from multiple goroutines.
+	// Get item with the loader function (if configured)
+	// it is only ever called once, even if it's called from multiple goroutines.
 	Get(Key) (Value, bool, error)
+	// Get item from cache (if present) without loader
+	GetIfPresent(Key) (Value, bool)
 	// Check to see if the cache contains a key
 	Has(Key) bool
-	// If cache is created with 'WithMaxSize' option you get the keys in order from oldest to newest.
-	// Otherwise the keys will be in an indeterminate order.
+	// Get all keys, it will be in indeterminate order.
 	Keys() []Key
 	// Add a new item to the cache
 	Put(Key, Value)
@@ -42,10 +41,7 @@ type ICache[Key comparable, Value any] interface {
 }
 
 type Cache[Key comparable, Value any] struct {
-	entries  map[Key]*cacheEntry[Key, Value]
-	keyQueue *list.List
-
-	maxSize int
+	entries map[Key]*cacheEntry[Key, Value]
 	loader  LoaderFunc[Key, Value]
 
 	expireAfterWrite time.Duration
@@ -96,9 +92,9 @@ func (c *Cache[Key, Value]) Get(key Key) (Value, bool, error) {
 	unlock := c.keyedMu.lock(key)
 	defer unlock()
 
-	entry, found := c.getSafe(key)
-	if found && !entry.isExpired() {
-		return entry.value, true, nil
+	entry, found := c.GetIfPresent(key)
+	if found {
+		return entry, true, nil
 	}
 
 	value, ok, err := c.load(key)
@@ -110,52 +106,32 @@ func (c *Cache[Key, Value]) Get(key Key) (Value, bool, error) {
 	return value, ok, err
 }
 
+func (c *Cache[Key, Value]) GetIfPresent(key Key) (Value, bool) {
+	entry, found := c.getSafe(key)
+
+	if found && !entry.isExpired() {
+		return entry.value, true
+	}
+
+	var value Value
+	return value, false
+}
+
 func (c *Cache[Key, Value]) Has(key Key) bool {
 	entry, found := c.getSafe(key)
 	return found && !entry.isExpired()
 }
 
 func (c *Cache[Key, Value]) Keys() []Key {
-	entries := c.nonExpiredEntries()
-	if c.maxSize > 0 {
-		keys := make([]Key, 0, len(entries))
-		for e := c.keyQueue.Front(); e != nil; e = e.Next() {
-			k := e.Value.(Key)
-			entry, found := entries[k]
-			if found && !entry.isExpired() {
-				keys = append(keys, k)
-			}
-		}
-		return keys
-	}
-	return maps.Keys(entries)
+	return maps.Keys(c.nonExpiredEntries())
 }
 
 func (c *Cache[Key, Value]) Put(key Key, value Value) {
 	entry := c.newEntry(key, value)
-
-	if c.maxSize > 0 {
-		if c.keyQueue.Len() == c.maxSize {
-			e := c.dequeueSafe()
-			k := e.Value.(Key)
-			c.removeSafe(k)
-		}
-		c.keyQueue.PushBack(key)
-	}
-
 	c.putSafe(entry)
 }
 
 func (c *Cache[Key, Value]) Remove(key Key) {
-	if c.maxSize > 0 {
-		for e := c.keyQueue.Front(); e != nil; e = e.Next() {
-			k := e.Value.(Key)
-			if k == key {
-				c.keyQueue.Remove(e)
-				break
-			}
-		}
-	}
 	c.removeSafe(key)
 }
 
@@ -214,16 +190,6 @@ func WithOnExpired[Key comparable, Value any](
 	}
 }
 
-func WithMaxSize[Key comparable, Value any](
-	maxSize int,
-) Option[Key, Value] {
-	return func(c *Cache[Key, Value]) {
-		c.entries = make(map[Key]*cacheEntry[Key, Value], maxSize)
-		c.maxSize = maxSize
-		c.keyQueue = list.New()
-	}
-}
-
 func (c *Cache[Key, Value]) newEntry(key Key, value Value) *cacheEntry[Key, Value] {
 	var expiration time.Time
 
@@ -254,7 +220,7 @@ func (c *Cache[Key, Value]) cleanup() {
 	for _, key := range keys {
 		entry, found := c.getSafe(key)
 		if found && entry.isExpired() {
-			c.Remove(key)
+			c.removeSafe(key)
 			if c.onExpired != nil {
 				c.onExpired(entry.key, entry.value)
 			}
@@ -290,12 +256,4 @@ func (c *Cache[Key, Value]) removeSafe(key Key) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.entries, key)
-}
-
-func (c *Cache[Key, Value]) dequeueSafe() *list.Element {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	e := c.keyQueue.Front()
-	c.keyQueue.Remove(e)
-	return e
 }
