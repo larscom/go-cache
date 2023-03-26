@@ -42,8 +42,8 @@ type ICache[Key comparable, Value any] interface {
 }
 
 type Cache[Key comparable, Value any] struct {
-	entries    map[Key]*cacheEntry[Key, Value]
-	entryQueue *list.List
+	entries  map[Key]*cacheEntry[Key, Value]
+	keyQueue *list.List
 
 	maxSize int
 	loader  LoaderFunc[Key, Value]
@@ -119,10 +119,11 @@ func (c *Cache[Key, Value]) Keys() []Key {
 	entries := c.nonExpiredEntries()
 	if c.maxSize > 0 {
 		keys := make([]Key, 0, len(entries))
-		for e := c.entryQueue.Front(); e != nil; e = e.Next() {
-			entry := e.Value.(*cacheEntry[Key, Value])
-			if !entry.isExpired() {
-				keys = append(keys, entry.key)
+		for e := c.keyQueue.Front(); e != nil; e = e.Next() {
+			k := e.Value.(Key)
+			entry, found := entries[k]
+			if found && !entry.isExpired() {
+				keys = append(keys, k)
 			}
 		}
 		return keys
@@ -134,11 +135,12 @@ func (c *Cache[Key, Value]) Put(key Key, value Value) {
 	entry := c.newEntry(key, value)
 
 	if c.maxSize > 0 {
-		if c.entryQueue.Len() == c.maxSize {
+		if c.keyQueue.Len() == c.maxSize {
 			e := c.dequeueSafe()
-			c.removeSafe(e.Value.(*cacheEntry[Key, Value]).key)
+			k := e.Value.(Key)
+			c.removeSafe(k)
 		}
-		c.entryQueue.PushBack(entry)
+		c.keyQueue.PushBack(key)
 	}
 
 	c.putSafe(entry)
@@ -146,10 +148,10 @@ func (c *Cache[Key, Value]) Put(key Key, value Value) {
 
 func (c *Cache[Key, Value]) Remove(key Key) {
 	if c.maxSize > 0 {
-		for e := c.entryQueue.Front(); e != nil; e = e.Next() {
-			entry := e.Value.(*cacheEntry[Key, Value])
-			if entry.key == key {
-				c.entryQueue.Remove(e)
+		for e := c.keyQueue.Front(); e != nil; e = e.Next() {
+			k := e.Value.(Key)
+			if k == key {
+				c.keyQueue.Remove(e)
 				break
 			}
 		}
@@ -218,7 +220,7 @@ func WithMaxSize[Key comparable, Value any](
 	return func(c *Cache[Key, Value]) {
 		c.entries = make(map[Key]*cacheEntry[Key, Value], maxSize)
 		c.maxSize = maxSize
-		c.entryQueue = list.New()
+		c.keyQueue = list.New()
 	}
 }
 
@@ -293,7 +295,7 @@ func (c *Cache[Key, Value]) removeSafe(key Key) {
 func (c *Cache[Key, Value]) dequeueSafe() *list.Element {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	e := c.entryQueue.Front()
-	c.entryQueue.Remove(e)
+	e := c.keyQueue.Front()
+	c.keyQueue.Remove(e)
 	return e
 }
