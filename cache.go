@@ -93,12 +93,17 @@ func (c *Cache[Key, Value]) ForEach(fn func(Key, Value)) {
 }
 
 func (c *Cache[Key, Value]) Get(key Key) (Value, error) {
+	unlock := c.kmu.lock(key)
+
 	entry, found := c.GetIfPresent(key)
 	if found {
+		unlock()
 		return entry, nil
 	}
 
 	value, err := c.load(key)
+
+	unlock()
 
 	if err == nil {
 		c.Put(key, value)
@@ -119,7 +124,11 @@ func (c *Cache[Key, Value]) GetIfPresent(key Key) (Value, bool) {
 }
 
 func (c *Cache[Key, Value]) Refresh(key Key) (Value, error) {
+	unlock := c.kmu.lock(key)
+
 	value, err := c.load(key)
+
+	unlock()
 
 	if err == nil {
 		c.Put(key, value)
@@ -244,9 +253,6 @@ func (c *Cache[Key, Value]) load(key Key) (Value, error) {
 		var val Value
 		return val, fmt.Errorf("you must configure a loader, use GetIfPresent instead")
 	}
-
-	unlock := c.kmu.lock(key)
-	defer unlock()
 
 	value, err := c.loader(key)
 
