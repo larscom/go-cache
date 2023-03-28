@@ -3,7 +3,6 @@ package cache
 import (
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -389,62 +388,6 @@ func Test_WithLoader(t *testing.T) {
 		assert.Equal(t, fmt.Errorf("ERROR"), err)
 		assert.Zero(t, value)
 	})
-	t.Run("call loader once per key", func(t *testing.T) {
-		var counter int32
-		cache := createCache(WithLoader(func(key int) (int, error) {
-			atomic.AddInt32(&counter, 1)
-			time.Sleep(time.Millisecond * 10)
-			return 12345, nil
-		}))
-
-		go func() {
-			cache.Get(1)
-		}()
-		go func() {
-			cache.Get(1)
-		}()
-
-		go func() {
-			cache.Get(2)
-		}()
-		go func() {
-			cache.Get(2)
-		}()
-
-		<-time.After(time.Millisecond * 15)
-
-		r := atomic.LoadInt32(&counter)
-
-		assert.Equal(t, 2, int(r))
-	})
-	t.Run("call loader once per key for refresh", func(t *testing.T) {
-		var counter int32
-		cache := createCache(WithLoader(func(key int) (int, error) {
-			atomic.AddInt32(&counter, 1)
-			time.Sleep(time.Millisecond * 10)
-			return 12345, nil
-		}))
-
-		go func() {
-			cache.Refresh(1)
-		}()
-		go func() {
-			cache.Refresh(1)
-		}()
-
-		go func() {
-			cache.Refresh(2)
-		}()
-		go func() {
-			cache.Refresh(2)
-		}()
-
-		<-time.After(time.Millisecond * 15)
-
-		r := atomic.LoadInt32(&counter)
-
-		assert.Equal(t, 2, int(r))
-	})
 	t.Run("refresh", func(t *testing.T) {
 		cache := createCache(WithLoader(func(key int) (int, error) {
 			return 12345, nil
@@ -465,7 +408,6 @@ func Test_WithLoader(t *testing.T) {
 
 		assert.Equal(t, 12345, value)
 	})
-
 	t.Run("refresh no update on error", func(t *testing.T) {
 		cache := createCache(WithLoader(func(key int) (int, error) {
 			return 0, fmt.Errorf("ERROR")

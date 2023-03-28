@@ -51,7 +51,8 @@ type Cache[Key comparable, Value any] struct {
 	expireAfterWrite time.Duration
 	onExpired        func(Key, Value)
 
-	mu sync.RWMutex
+	mu  sync.RWMutex
+	kmu KeyedMutex[Key]
 
 	cancel context.CancelFunc
 	ticker *ticker
@@ -244,8 +245,8 @@ func (c *Cache[Key, Value]) load(key Key) (Value, error) {
 		return val, fmt.Errorf("you must configure a loader, use GetIfPresent instead")
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	unlock := c.kmu.lock(key)
+	defer unlock()
 
 	value, err := c.loader(key)
 
