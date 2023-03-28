@@ -55,22 +55,22 @@ func Test_Core(t *testing.T) {
 			assert.Equal(t, key+1, value)
 		})
 	})
-	t.Run("get zero", func(t *testing.T) {
+	t.Run("get should error without loader and value in cache", func(t *testing.T) {
 		cache := createCache()
-		val, found, err := cache.Get(1)
+		val, err := cache.Get(1)
+
 		assert.Zero(t, val)
-		assert.False(t, found)
-		assert.NoError(t, err)
+		assert.Error(t, err)
+		assert.Equal(t, fmt.Errorf("you must configure a loader, use GetIfPresent instead"), err)
 	})
 	t.Run("get", func(t *testing.T) {
 		cache := createCache()
 		const key = 1
 
 		cache.Put(key, 100)
-		val, found, err := cache.Get(key)
+		val, err := cache.Get(key)
 
 		assert.Equal(t, 100, val)
-		assert.True(t, found)
 		assert.NoError(t, err)
 	})
 	t.Run("get if present", func(t *testing.T) {
@@ -89,14 +89,14 @@ func Test_Core(t *testing.T) {
 		assert.Zero(t, val)
 		assert.False(t, found)
 	})
-	t.Run("refresh without loader", func(t *testing.T) {
+	t.Run("refresh without loader should error", func(t *testing.T) {
 		cache := createCache()
 
-		val, ok, err := cache.Refresh(1)
+		val, err := cache.Refresh(1)
 
 		assert.Zero(t, val)
-		assert.False(t, ok)
-		assert.NoError(t, err)
+		assert.Error(t, err)
+		assert.Equal(t, fmt.Errorf("you must configure a loader, use GetIfPresent instead"), err)
 	})
 	t.Run("has not", func(t *testing.T) {
 		cache := createCache()
@@ -126,11 +126,10 @@ func Test_Core(t *testing.T) {
 
 		cache.Put(key, 100)
 		cache.Put(key, 200)
-		val, found, err := cache.Get(key)
+		val, err := cache.Get(key)
 
 		assert.Equal(t, 1, cache.Count())
 		assert.Equal(t, 200, val)
-		assert.True(t, found)
 		assert.NoError(t, err)
 	})
 	t.Run("remove", func(t *testing.T) {
@@ -157,7 +156,7 @@ func Test_Core(t *testing.T) {
 		assert.Equal(t, cache.Count(), len(m))
 
 		for key, value := range m {
-			cachedVal, _, _ := cache.Get(key)
+			cachedVal, _ := cache.Get(key)
 			assert.Equal(t, cachedVal, value)
 		}
 	})
@@ -207,10 +206,9 @@ func Test_WithExpireAfterWrite(t *testing.T) {
 		const key = 1
 		c.Put(key, 100)
 
-		v, found, err := c.Get(key)
+		v, err := c.Get(key)
 
 		assert.Equal(t, 100, v)
-		assert.True(t, found)
 		assert.NoError(t, err)
 	})
 	t.Run("get is expired", func(t *testing.T) {
@@ -222,11 +220,11 @@ func Test_WithExpireAfterWrite(t *testing.T) {
 
 		<-time.After(time.Millisecond * 15)
 
-		v, found, err := c.Get(key)
+		v, err := c.Get(key)
 
 		assert.Zero(t, v)
-		assert.False(t, found)
-		assert.NoError(t, err)
+		assert.Error(t, err)
+		assert.Equal(t, fmt.Errorf("you must configure a loader, use GetIfPresent instead"), err)
 	})
 	t.Run("get if present", func(t *testing.T) {
 		ttl := time.Millisecond * 10
@@ -362,10 +360,9 @@ func Test_WithLoader(t *testing.T) {
 			return 12345, nil
 		}))
 
-		value, ok, err := c.Get(1)
+		value, err := c.Get(1)
 
 		assert.Equal(t, 12345, value)
-		assert.True(t, ok)
 		assert.NoError(t, err)
 	})
 	t.Run("get from cache", func(t *testing.T) {
@@ -376,10 +373,9 @@ func Test_WithLoader(t *testing.T) {
 		const key = 1
 		c.Put(key, 100)
 
-		value, ok, err := c.Get(key)
+		value, err := c.Get(key)
 
 		assert.Equal(t, 100, value)
-		assert.True(t, ok)
 		assert.NoError(t, err)
 	})
 	t.Run("get loader error", func(t *testing.T) {
@@ -387,9 +383,8 @@ func Test_WithLoader(t *testing.T) {
 			return 0, fmt.Errorf("ERROR")
 		}))
 
-		value, found, err := c.Get(1)
+		value, err := c.Get(1)
 
-		assert.False(t, found)
 		assert.Error(t, err)
 		assert.Equal(t, fmt.Errorf("ERROR"), err)
 		assert.Zero(t, value)
@@ -459,15 +454,14 @@ func Test_WithLoader(t *testing.T) {
 
 		cache.Put(key, 100)
 
-		value, _, _ := cache.Get(key)
+		value, _ := cache.Get(key)
 		assert.Equal(t, 100, value)
 
-		value, ok, err := cache.Refresh(key)
-		assert.True(t, ok)
+		value, err := cache.Refresh(key)
 		assert.NoError(t, err)
 		assert.Equal(t, 12345, value)
 
-		value, _, _ = cache.Get(key)
+		value, _ = cache.Get(key)
 
 		assert.Equal(t, 12345, value)
 	})
@@ -481,18 +475,17 @@ func Test_WithLoader(t *testing.T) {
 
 		cache.Put(key, 100)
 
-		value, _, _ := cache.Get(key)
+		value, _ := cache.Get(key)
 		assert.Equal(t, 100, value)
 
-		value, ok, err := cache.Refresh(key)
+		value, err := cache.Refresh(key)
 		assert.Zero(t, value)
-		assert.False(t, ok)
 		assert.Error(t, err)
 		assert.Equal(t, fmt.Errorf("ERROR"), err)
 
-		value, ok, _ = cache.Get(key)
+		value, err = cache.Get(key)
 
-		assert.True(t, ok)
+		assert.NoError(t, err)
 		assert.Equal(t, 100, value)
 	})
 }

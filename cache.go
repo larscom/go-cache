@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -23,11 +24,12 @@ type ICache[Key comparable, Value any] interface {
 	ForEach(func(Key, Value))
 	// Get item with the loader function (if configured)
 	// it is only ever called once, even if it's called from multiple goroutines.
-	Get(Key) (Value, bool, error)
+	// When no loader is configured, use GetIfPresent instead
+	Get(Key) (Value, error)
 	// Get item from cache (if present) without loader
 	GetIfPresent(Key) (Value, bool)
 	// Refresh item in cache
-	Refresh(Key) (Value, bool, error)
+	Refresh(Key) (Value, error)
 	// Check to see if the cache contains a key
 	Has(Key) bool
 	// Get all keys, it will be in indeterminate order.
@@ -89,19 +91,19 @@ func (c *Cache[Key, Value]) ForEach(fn func(Key, Value)) {
 	}
 }
 
-func (c *Cache[Key, Value]) Get(key Key) (Value, bool, error) {
+func (c *Cache[Key, Value]) Get(key Key) (Value, error) {
 	entry, found := c.GetIfPresent(key)
 	if found {
-		return entry, true, nil
+		return entry, nil
 	}
 
-	value, ok, err := c.load(key)
+	value, err := c.load(key)
 
-	if ok {
+	if err == nil {
 		c.Put(key, value)
 	}
 
-	return value, ok, err
+	return value, err
 }
 
 func (c *Cache[Key, Value]) GetIfPresent(key Key) (Value, bool) {
@@ -115,14 +117,14 @@ func (c *Cache[Key, Value]) GetIfPresent(key Key) (Value, bool) {
 	return value, false
 }
 
-func (c *Cache[Key, Value]) Refresh(key Key) (Value, bool, error) {
-	value, ok, err := c.load(key)
+func (c *Cache[Key, Value]) Refresh(key Key) (Value, error) {
+	value, err := c.load(key)
 
-	if ok {
+	if err == nil {
 		c.Put(key, value)
 	}
 
-	return value, ok, err
+	return value, err
 }
 
 func (c *Cache[Key, Value]) Has(key Key) bool {
@@ -236,10 +238,10 @@ func (c *Cache[Key, Value]) cleanup() {
 	}
 }
 
-func (c *Cache[Key, Value]) load(key Key) (Value, bool, error) {
+func (c *Cache[Key, Value]) load(key Key) (Value, error) {
 	if c.loader == nil {
 		var val Value
-		return val, false, nil
+		return val, fmt.Errorf("you must configure a loader, use GetIfPresent instead")
 	}
 
 	c.mu.Lock()
@@ -247,7 +249,7 @@ func (c *Cache[Key, Value]) load(key Key) (Value, bool, error) {
 
 	value, err := c.loader(key)
 
-	return value, err == nil, err
+	return value, err
 }
 
 func (c *Cache[Key, Value]) getSafe(key Key) (*cacheEntry[Key, Value], bool) {

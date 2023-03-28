@@ -52,6 +52,9 @@ func main() {
 	})
 
     c := cache.NewCache(loader)
+
+    // use Get() with a loader
+    value, err := c.Get(123)
 }
 ```
 
@@ -63,6 +66,9 @@ With `TTL`
 func main() {
     c := cache.NewCache(cache.WithExpireAfterWrite[int, string](time.Second * 10))
     defer c.Close()
+
+    // use GetIfPresent() without a loader
+    value, found := c.GetIfPresent(123)
 }
 ```
 

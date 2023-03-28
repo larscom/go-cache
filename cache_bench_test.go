@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"fmt"
 	"math/rand"
 	"strings"
 	"testing"
@@ -39,7 +40,9 @@ func Benchmark_GetPutMultipleConcurrent(b *testing.B) {
 }
 
 func Benchmark_GetConcurrently(b *testing.B) {
-	cache := NewCache[int, string]()
+	cache := NewCache(WithLoader(func(key int) (string, error) {
+		return fmt.Sprint(key), nil
+	}))
 
 	n := 100000
 	value := strings.Repeat("a", 256)
@@ -49,8 +52,8 @@ func Benchmark_GetConcurrently(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			key := rand.Intn(n)
-			val, ok, _ := cache.Get(key)
-			if !ok {
+			val, err := cache.Get(key)
+			if err != nil {
 				b.Errorf("key: %v; value: %v", key, val)
 			}
 			if val != value {
