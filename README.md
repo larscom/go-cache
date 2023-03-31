@@ -6,6 +6,7 @@
 > Simple in-memory `thread safe` cache
 
 - With Loader (optional)
+  - Common use case: fetch some data from an API and store in cache
 - With TTL (optional)
 
 ## 🚀 Install
@@ -24,7 +25,7 @@ import (
 )
 ```
 
-> Create a new cache with `int` type as key and `string` type as value. Which creates a regular cache, nothing special, except that it's `thread safe`
+> Create a new cache with `int` type as key and `string` type as value. Which creates a regular cache.
 
 ```go
 func main() {
@@ -60,7 +61,7 @@ func main() {
 
 With `TTL`
 
-> Create a new cache with time to live of 10 seconds for all entries
+> Create a new cache with time to live of 10 seconds.
 
 ```go
 func main() {
@@ -74,7 +75,7 @@ func main() {
 
 With `onExpired` function
 
-> This function gets called whenever an item in the cache expires
+> This function gets called whenever an item in the cache expires.
 
 ```go
 func main() {
@@ -83,5 +84,40 @@ func main() {
         // do something with expired key/value
 	}))
     defer c.Close()
+}
+```
+
+## ⚡️ Interface
+
+```go
+type Cache[Key comparable, Value any] interface {
+	// Clears the whole cache
+	Clear()
+	// Stop the timers
+	Close()
+	// Total amount of entries
+	Count() int
+	// Loop over each entry in the cache
+	ForEach(func(Key, Value))
+	// Get item with the loader function (if configured)
+	// it is only ever called once, even if it's called from multiple goroutines.
+	// When no loader is configured, use GetIfPresent instead
+	Get(Key) (Value, error)
+	// Get item from cache (if present) without loader
+	GetIfPresent(Key) (Value, bool)
+	// Refresh item in cache
+	Refresh(Key) (Value, error)
+	// Check to see if the cache contains a key
+	Has(Key) bool
+	// Get all keys, it will be in indeterminate order.
+	Keys() []Key
+	// Add a new item to the cache
+	Put(Key, Value)
+	// Remove an item from the cache
+	Remove(Key)
+	// Get the map with the key/value pairs, it will be in indeterminate order.
+	ToMap() map[Key]Value
+	// Get all values, it will be in indeterminate order.
+	Values() []Value
 }
 ```

@@ -9,11 +9,11 @@ import (
 	"golang.org/x/exp/maps"
 )
 
-type Option[Key comparable, Value any] func(c *Cache[Key, Value])
+type Option[Key comparable, Value any] func(c *CacheImpl[Key, Value])
 
 type LoaderFunc[Key comparable, Value any] func(Key) (Value, error)
 
-type ICache[Key comparable, Value any] interface {
+type Cache[Key comparable, Value any] interface {
 	// Clears the whole cache
 	Clear()
 	// Stop the timers
@@ -44,7 +44,7 @@ type ICache[Key comparable, Value any] interface {
 	Values() []Value
 }
 
-type Cache[Key comparable, Value any] struct {
+type CacheImpl[Key comparable, Value any] struct {
 	entries map[Key]*cacheEntry[Key, Value]
 	loader  LoaderFunc[Key, Value]
 
@@ -60,8 +60,8 @@ type Cache[Key comparable, Value any] struct {
 
 func NewCache[Key comparable, Value any](
 	options ...Option[Key, Value],
-) ICache[Key, Value] {
-	c := &Cache[Key, Value]{
+) Cache[Key, Value] {
+	c := &CacheImpl[Key, Value]{
 		entries: make(map[Key]*cacheEntry[Key, Value]),
 	}
 	for _, opt := range options {
@@ -70,29 +70,29 @@ func NewCache[Key comparable, Value any](
 	return c
 }
 
-func (c *Cache[Key, Value]) Clear() {
+func (c *CacheImpl[Key, Value]) Clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.entries = make(map[Key]*cacheEntry[Key, Value])
 }
 
-func (c *Cache[Key, Value]) Close() {
+func (c *CacheImpl[Key, Value]) Close() {
 	if c.cancel != nil {
 		c.cancel()
 	}
 }
 
-func (c *Cache[Key, Value]) Count() int {
+func (c *CacheImpl[Key, Value]) Count() int {
 	return len(c.nonExpiredEntries())
 }
 
-func (c *Cache[Key, Value]) ForEach(fn func(Key, Value)) {
+func (c *CacheImpl[Key, Value]) ForEach(fn func(Key, Value)) {
 	for key, entry := range c.nonExpiredEntries() {
 		fn(key, entry.value)
 	}
 }
 
-func (c *Cache[Key, Value]) Get(key Key) (Value, error) {
+func (c *CacheImpl[Key, Value]) Get(key Key) (Value, error) {
 	unlock := c.kmu.lock(key)
 
 	entry, found := c.get(key)
@@ -112,7 +112,7 @@ func (c *Cache[Key, Value]) Get(key Key) (Value, error) {
 	return value, err
 }
 
-func (c *Cache[Key, Value]) GetIfPresent(key Key) (Value, bool) {
+func (c *CacheImpl[Key, Value]) GetIfPresent(key Key) (Value, bool) {
 	entry, found := c.getSafe(key)
 
 	if found && !entry.isExpired() {
@@ -123,7 +123,7 @@ func (c *Cache[Key, Value]) GetIfPresent(key Key) (Value, bool) {
 	return value, false
 }
 
-func (c *Cache[Key, Value]) Refresh(key Key) (Value, error) {
+func (c *CacheImpl[Key, Value]) Refresh(key Key) (Value, error) {
 	unlock := c.kmu.lock(key)
 
 	value, err := c.load(key)
@@ -137,25 +137,25 @@ func (c *Cache[Key, Value]) Refresh(key Key) (Value, error) {
 	return value, err
 }
 
-func (c *Cache[Key, Value]) Has(key Key) bool {
+func (c *CacheImpl[Key, Value]) Has(key Key) bool {
 	_, found := c.GetIfPresent(key)
 	return found
 }
 
-func (c *Cache[Key, Value]) Keys() []Key {
+func (c *CacheImpl[Key, Value]) Keys() []Key {
 	return maps.Keys(c.nonExpiredEntries())
 }
 
-func (c *Cache[Key, Value]) Put(key Key, value Value) {
+func (c *CacheImpl[Key, Value]) Put(key Key, value Value) {
 	entry := c.newEntry(key, value)
 	c.putSafe(entry)
 }
 
-func (c *Cache[Key, Value]) Remove(key Key) {
+func (c *CacheImpl[Key, Value]) Remove(key Key) {
 	c.removeSafe(key)
 }
 
-func (c *Cache[Key, Value]) ToMap() map[Key]Value {
+func (c *CacheImpl[Key, Value]) ToMap() map[Key]Value {
 	m := make(map[Key]Value)
 	for key, entry := range c.nonExpiredEntries() {
 		m[key] = entry.value
@@ -163,7 +163,7 @@ func (c *Cache[Key, Value]) ToMap() map[Key]Value {
 	return m
 }
 
-func (c *Cache[Key, Value]) Values() []Value {
+func (c *CacheImpl[Key, Value]) Values() []Value {
 	entries := maps.Values(c.nonExpiredEntries())
 	n := len(entries)
 	values := make([]Value, n)
@@ -183,7 +183,7 @@ func WithExpireAfterWriteCustom[Key comparable, Value any](
 	expireAfterWrite time.Duration,
 	cleanupInterval time.Duration,
 ) Option[Key, Value] {
-	return func(c *Cache[Key, Value]) {
+	return func(c *CacheImpl[Key, Value]) {
 		c.expireAfterWrite = expireAfterWrite
 		if c.ticker == nil {
 			ctx, cancel := context.WithCancel(context.Background())
@@ -197,7 +197,7 @@ func WithExpireAfterWriteCustom[Key comparable, Value any](
 func WithLoader[Key comparable, Value any](
 	loader LoaderFunc[Key, Value],
 ) Option[Key, Value] {
-	return func(c *Cache[Key, Value]) {
+	return func(c *CacheImpl[Key, Value]) {
 		c.loader = loader
 	}
 }
@@ -205,12 +205,12 @@ func WithLoader[Key comparable, Value any](
 func WithOnExpired[Key comparable, Value any](
 	onExpired func(Key, Value),
 ) Option[Key, Value] {
-	return func(c *Cache[Key, Value]) {
+	return func(c *CacheImpl[Key, Value]) {
 		c.onExpired = onExpired
 	}
 }
 
-func (c *Cache[Key, Value]) newEntry(key Key, value Value) *cacheEntry[Key, Value] {
+func (c *CacheImpl[Key, Value]) newEntry(key Key, value Value) *cacheEntry[Key, Value] {
 	var expiration time.Time
 
 	if c.expireAfterWrite > 0 {
@@ -220,7 +220,7 @@ func (c *Cache[Key, Value]) newEntry(key Key, value Value) *cacheEntry[Key, Valu
 	return &cacheEntry[Key, Value]{key, value, expiration}
 }
 
-func (c *Cache[Key, Value]) nonExpiredEntries() map[Key]*cacheEntry[Key, Value] {
+func (c *CacheImpl[Key, Value]) nonExpiredEntries() map[Key]*cacheEntry[Key, Value] {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	e := make(map[Key]*cacheEntry[Key, Value])
@@ -232,7 +232,7 @@ func (c *Cache[Key, Value]) nonExpiredEntries() map[Key]*cacheEntry[Key, Value] 
 	return e
 }
 
-func (c *Cache[Key, Value]) cleanup() {
+func (c *CacheImpl[Key, Value]) cleanup() {
 	c.mu.RLock()
 	keys := maps.Keys(c.entries)
 	c.mu.RUnlock()
@@ -248,7 +248,7 @@ func (c *Cache[Key, Value]) cleanup() {
 	}
 }
 
-func (c *Cache[Key, Value]) load(key Key) (Value, error) {
+func (c *CacheImpl[Key, Value]) load(key Key) (Value, error) {
 	if c.loader == nil {
 		var val Value
 		return val, fmt.Errorf("you must configure a loader, use GetIfPresent instead")
@@ -259,25 +259,25 @@ func (c *Cache[Key, Value]) load(key Key) (Value, error) {
 	return value, err
 }
 
-func (c *Cache[Key, Value]) get(key Key) (*cacheEntry[Key, Value], bool) {
+func (c *CacheImpl[Key, Value]) get(key Key) (*cacheEntry[Key, Value], bool) {
 	entry, found := c.entries[key]
 	return entry, found
 }
 
-func (c *Cache[Key, Value]) getSafe(key Key) (*cacheEntry[Key, Value], bool) {
+func (c *CacheImpl[Key, Value]) getSafe(key Key) (*cacheEntry[Key, Value], bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	entry, found := c.entries[key]
 	return entry, found
 }
 
-func (c *Cache[Key, Value]) putSafe(entry *cacheEntry[Key, Value]) {
+func (c *CacheImpl[Key, Value]) putSafe(entry *cacheEntry[Key, Value]) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.entries[entry.key] = entry
 }
 
-func (c *Cache[Key, Value]) removeSafe(key Key) {
+func (c *CacheImpl[Key, Value]) removeSafe(key Key) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.entries, key)
