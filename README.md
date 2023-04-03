@@ -1,7 +1,8 @@
 # GO-CACHE
 
-[![codecov](https://codecov.io/gh/larscom/go-cache/branch/master/graph/badge.svg?token=E9wcYNmOYN)](https://codecov.io/gh/larscom/go-cache)
+[![Go Report Card](https://goreportcard.com/badge/github.com/larscom/go-cache)](https://goreportcard.com/report/github.com/larscom/go-cache)
 [![Go Reference](https://pkg.go.dev/badge/github.com/larscom/go-cache.svg)](https://pkg.go.dev/github.com/larscom/go-cache)
+[![codecov](https://codecov.io/gh/larscom/go-cache/branch/master/graph/badge.svg?token=E9wcYNmOYN)](https://codecov.io/gh/larscom/go-cache)
 
 > Simple in-memory `thread safe` cache
 
