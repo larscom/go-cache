@@ -95,7 +95,7 @@ func (c *CacheImpl[Key, Value]) ForEach(fn func(Key, Value)) {
 func (c *CacheImpl[Key, Value]) Get(key Key) (Value, error) {
 	unlock := c.kmu.lock(key)
 
-	entry, found := c.get(key)
+	entry, found := c.getSafe(key)
 	if found && !entry.isExpired() {
 		unlock()
 		return entry.value, nil
@@ -257,11 +257,6 @@ func (c *CacheImpl[Key, Value]) load(key Key) (Value, error) {
 	value, err := c.loader(key)
 
 	return value, err
-}
-
-func (c *CacheImpl[Key, Value]) get(key Key) (*cacheEntry[Key, Value], bool) {
-	entry, found := c.entries[key]
-	return entry, found
 }
 
 func (c *CacheImpl[Key, Value]) getSafe(key Key) (*cacheEntry[Key, Value], bool) {
