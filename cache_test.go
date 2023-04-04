@@ -10,7 +10,7 @@ import (
 )
 
 func createCache(options ...Option[int, int]) Cache[int, int] {
-	return NewCache(options...)
+	return New(options...)
 }
 
 func Test_Core(t *testing.T) {

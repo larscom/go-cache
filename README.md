@@ -29,7 +29,7 @@ import (
 
 ```go
 func main() {
-    c := cache.NewCache[int, string]()
+    c := cache.New[int, string]()
 }
 ```
 
@@ -52,7 +52,7 @@ func main() {
         return string(r), nil
 	})
 
-    c := cache.NewCache(loader)
+    c := cache.New(loader)
 
     // use Get() with a loader
     value, err := c.Get(123)
@@ -65,7 +65,7 @@ With `TTL`
 
 ```go
 func main() {
-    c := cache.NewCache(cache.WithExpireAfterWrite[int, string](time.Second * 10))
+    c := cache.New(cache.WithExpireAfterWrite[int, string](time.Second * 10))
     defer c.Close()
 
     // use GetIfPresent() without a loader
@@ -80,44 +80,9 @@ With `onExpired` function
 ```go
 func main() {
     ttl := cache.WithExpireAfterWrite[int, string](time.Second * 10)
-    c := cache.NewCache(ttl, cache.WithOnExpired[int, string](func(key int, value string) {
+    c := cache.New(ttl, cache.WithOnExpired[int, string](func(key int, value string) {
         // do something with expired key/value
 	}))
     defer c.Close()
-}
-```
-
-## ⚡️ Interface
-
-```go
-type Cache[Key comparable, Value any] interface {
-	// Clears the whole cache
-	Clear()
-	// Stop the timers
-	Close()
-	// Total amount of entries
-	Count() int
-	// Loop over each entry in the cache
-	ForEach(func(Key, Value))
-	// Get item with the loader function (if configured)
-	// it is only ever called once, even if it's called from multiple goroutines.
-	// When no loader is configured, use GetIfPresent instead
-	Get(Key) (Value, error)
-	// Get item from cache (if present) without loader
-	GetIfPresent(Key) (Value, bool)
-	// Refresh item in cache
-	Refresh(Key) (Value, error)
-	// Check to see if the cache contains a key
-	Has(Key) bool
-	// Get all keys, it will be in indeterminate order.
-	Keys() []Key
-	// Add a new item to the cache
-	Put(Key, Value)
-	// Remove an item from the cache
-	Remove(Key)
-	// Get the map with the key/value pairs, it will be in indeterminate order.
-	ToMap() map[Key]Value
-	// Get all values, it will be in indeterminate order.
-	Values() []Value
 }
 ```

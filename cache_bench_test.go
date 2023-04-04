@@ -8,7 +8,7 @@ import (
 )
 
 func Benchmark_Get(b *testing.B) {
-	cache := NewCache[int, int]()
+	cache := New[int, int]()
 	for n := 0; n < b.N; n++ {
 		cache.Get(n)
 	}
@@ -16,7 +16,7 @@ func Benchmark_Get(b *testing.B) {
 }
 
 func Benchmark_GetPutMultipleConcurrent(b *testing.B) {
-	cache := NewCache[string, string]()
+	cache := New[string, string]()
 
 	data := map[string]string{
 		"k1": "v1",
@@ -40,7 +40,7 @@ func Benchmark_GetPutMultipleConcurrent(b *testing.B) {
 }
 
 func Benchmark_GetConcurrently(b *testing.B) {
-	cache := NewCache(WithLoader(func(key int) (string, error) {
+	cache := New(WithLoader(func(key int) (string, error) {
 		return fmt.Sprint(key), nil
 	}))
 
@@ -65,7 +65,7 @@ func Benchmark_GetConcurrently(b *testing.B) {
 }
 
 func Benchmark_GetIfPresentConcurrently(b *testing.B) {
-	cache := NewCache[int, string]()
+	cache := New[int, string]()
 
 	n := 100000
 	value := strings.Repeat("a", 256)
@@ -88,7 +88,7 @@ func Benchmark_GetIfPresentConcurrently(b *testing.B) {
 }
 
 func Benchmark_CountConcurrently(b *testing.B) {
-	cache := NewCache[int, int]()
+	cache := New[int, int]()
 
 	n := 100000
 	for i := 0; i < n; i++ {
@@ -112,7 +112,7 @@ func Benchmark_CountConcurrently(b *testing.B) {
 }
 
 func Benchmark_KeysConcurrently(b *testing.B) {
-	cache := NewCache[int, int]()
+	cache := New[int, int]()
 
 	n := 100000
 	for i := 0; i < n; i++ {
@@ -136,7 +136,7 @@ func Benchmark_KeysConcurrently(b *testing.B) {
 }
 
 func Benchmark_ValuesConcurrently(b *testing.B) {
-	cache := NewCache[int, int]()
+	cache := New[int, int]()
 
 	n := 100000
 	for i := 0; i < n; i++ {

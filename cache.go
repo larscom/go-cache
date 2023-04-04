@@ -13,52 +13,87 @@ type Option[Key comparable, Value any] func(c *CacheImpl[Key, Value])
 
 type LoaderFunc[Key comparable, Value any] func(Key) (Value, error)
 
-type Cache[Key comparable, Value any] interface {
-	// Clears the whole cache
-	Clear()
-	// Stop the timers
-	Close()
-	// Total amount of entries
-	Count() int
-	// Loop over each entry in the cache
-	ForEach(func(Key, Value))
+type CacheLoader[Key comparable, Value any] interface {
 	// Get item with the loader function (if configured)
 	// it is only ever called once, even if it's called from multiple goroutines.
-	// When no loader is configured, use GetIfPresent instead
 	Get(Key) (Value, error)
-	// Get item from cache (if present) without loader
-	GetIfPresent(Key) (Value, bool)
 	// Refresh item in cache
 	Refresh(Key) (Value, error)
-	// Check to see if the cache contains a key
-	Has(Key) bool
-	// Get all keys, it will be in indeterminate order.
-	Keys() []Key
-	// Add a new item to the cache
-	Put(Key, Value)
-	// Remove an item from the cache
-	Remove(Key)
-	// Get the map with the key/value pairs, it will be in indeterminate order.
-	ToMap() map[Key]Value
+}
+
+type CacheCloser[Key comparable, Value any] interface {
+	// Cleanup any timers
+	Close()
+}
+
+type CacheClearer[Key comparable, Value any] interface {
+	// Clears the whole cache
+	Clear()
+}
+
+type CacheCounter[Key comparable, Value any] interface {
+	// Total amount of entries
+	Count() int
+}
+
+type CacheIter[Key comparable, Value any] interface {
+	// Loop over each entry in the cache
+	ForEach(func(Key, Value))
 	// Get all values, it will be in indeterminate order.
 	Values() []Value
+	// Get all keys, it will be in indeterminate order.
+	Keys() []Key
+}
+
+type CacheGetter[Key comparable, Value any] interface {
+	// Get item from cache (if present) without loader
+	GetIfPresent(Key) (Value, bool)
+	// Check to see if the cache contains a key
+	Has(Key) bool
+}
+
+type CacheMapper[Key comparable, Value any] interface {
+	// Get the map with the key/value pairs, it will be in indeterminate order.
+	ToMap() map[Key]Value
+}
+
+type CachePutter[Key comparable, Value any] interface {
+	// Add a new item to the cache
+	Put(Key, Value)
+}
+
+type CacheRemover[Key comparable, Value any] interface {
+	// Remove an item from the cache
+	Remove(Key)
+}
+
+type Cache[Key comparable, Value any] interface {
+	CacheClearer[Key, Value]
+	CacheCloser[Key, Value]
+	CacheCounter[Key, Value]
+	CacheGetter[Key, Value]
+	CacheIter[Key, Value]
+	CacheLoader[Key, Value]
+	CacheMapper[Key, Value]
+	CachePutter[Key, Value]
+	CacheRemover[Key, Value]
 }
 
 type CacheImpl[Key comparable, Value any] struct {
-	entries map[Key]*cacheEntry[Key, Value]
-	loader  LoaderFunc[Key, Value]
+	entriesMu sync.RWMutex
+	entries   map[Key]*cacheEntry[Key, Value]
+
+	loaderMu KeyedMutex[Key]
+	loader   LoaderFunc[Key, Value]
 
 	expireAfterWrite time.Duration
 	onExpired        func(Key, Value)
-
-	mu  sync.RWMutex
-	kmu KeyedMutex[Key]
 
 	cancel context.CancelFunc
 	ticker *ticker
 }
 
-func NewCache[Key comparable, Value any](
+func New[Key comparable, Value any](
 	options ...Option[Key, Value],
 ) Cache[Key, Value] {
 	c := &CacheImpl[Key, Value]{
@@ -71,8 +106,8 @@ func NewCache[Key comparable, Value any](
 }
 
 func (c *CacheImpl[Key, Value]) Clear() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.entriesMu.Lock()
+	defer c.entriesMu.Unlock()
 	c.entries = make(map[Key]*cacheEntry[Key, Value])
 }
 
@@ -93,7 +128,7 @@ func (c *CacheImpl[Key, Value]) ForEach(fn func(Key, Value)) {
 }
 
 func (c *CacheImpl[Key, Value]) Get(key Key) (Value, error) {
-	unlock := c.kmu.lock(key)
+	unlock := c.loaderMu.lock(key)
 
 	entry, found := c.getSafe(key)
 	if found && !entry.isExpired() {
@@ -124,7 +159,7 @@ func (c *CacheImpl[Key, Value]) GetIfPresent(key Key) (Value, bool) {
 }
 
 func (c *CacheImpl[Key, Value]) Refresh(key Key) (Value, error) {
-	unlock := c.kmu.lock(key)
+	unlock := c.loaderMu.lock(key)
 
 	value, err := c.load(key)
 
@@ -221,8 +256,8 @@ func (c *CacheImpl[Key, Value]) newEntry(key Key, value Value) *cacheEntry[Key, 
 }
 
 func (c *CacheImpl[Key, Value]) nonExpiredEntries() map[Key]*cacheEntry[Key, Value] {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.entriesMu.RLock()
+	defer c.entriesMu.RUnlock()
 	e := make(map[Key]*cacheEntry[Key, Value])
 	for key, entry := range c.entries {
 		if !entry.isExpired() {
@@ -233,9 +268,9 @@ func (c *CacheImpl[Key, Value]) nonExpiredEntries() map[Key]*cacheEntry[Key, Val
 }
 
 func (c *CacheImpl[Key, Value]) cleanup() {
-	c.mu.RLock()
+	c.entriesMu.RLock()
 	keys := maps.Keys(c.entries)
-	c.mu.RUnlock()
+	c.entriesMu.RUnlock()
 
 	for _, key := range keys {
 		entry, found := c.getSafe(key)
@@ -260,20 +295,20 @@ func (c *CacheImpl[Key, Value]) load(key Key) (Value, error) {
 }
 
 func (c *CacheImpl[Key, Value]) getSafe(key Key) (*cacheEntry[Key, Value], bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.entriesMu.RLock()
+	defer c.entriesMu.RUnlock()
 	entry, found := c.entries[key]
 	return entry, found
 }
 
 func (c *CacheImpl[Key, Value]) putSafe(entry *cacheEntry[Key, Value]) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.entriesMu.Lock()
+	defer c.entriesMu.Unlock()
 	c.entries[entry.key] = entry
 }
 
 func (c *CacheImpl[Key, Value]) removeSafe(key Key) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.entriesMu.Lock()
+	defer c.entriesMu.Unlock()
 	delete(c.entries, key)
 }
