@@ -13,70 +13,34 @@ type Option[Key comparable, Value any] func(c *CacheImpl[Key, Value])
 
 type LoaderFunc[Key comparable, Value any] func(Key) (Value, error)
 
-type CacheLoader[Key comparable, Value any] interface {
+type Cache[Key comparable, Value any] interface {
+	// Get item from cache (if present) without loader
+	GetIfPresent(Key) (Value, bool)
+	// Check to see if the cache contains a key
+	Has(Key) bool
 	// Get item with the loader function (if configured)
 	// it is only ever called once, even if it's called from multiple goroutines.
 	Get(Key) (Value, error)
-	// Refresh item in cache
-	Refresh(Key) (Value, error)
-}
-
-type CacheCloser[Key comparable, Value any] interface {
-	// Cleanup any timers
-	Close()
-}
-
-type CacheClearer[Key comparable, Value any] interface {
-	// Clears the whole cache
-	Clear()
-}
-
-type CacheCounter[Key comparable, Value any] interface {
+	// Add a new item to the cache
+	Put(Key, Value)
 	// Total amount of entries
 	Count() int
-}
-
-type CacheIter[Key comparable, Value any] interface {
+	// Refresh item in cache
+	Refresh(Key) (Value, error)
+	// Remove an item from the cache
+	Remove(Key)
+	// Get the map with the key/value pairs, it will be in indeterminate order.
+	ToMap() map[Key]Value
 	// Loop over each entry in the cache
 	ForEach(func(Key, Value))
 	// Get all values, it will be in indeterminate order.
 	Values() []Value
 	// Get all keys, it will be in indeterminate order.
 	Keys() []Key
-}
-
-type CacheGetter[Key comparable, Value any] interface {
-	// Get item from cache (if present) without loader
-	GetIfPresent(Key) (Value, bool)
-	// Check to see if the cache contains a key
-	Has(Key) bool
-}
-
-type CacheMapper[Key comparable, Value any] interface {
-	// Get the map with the key/value pairs, it will be in indeterminate order.
-	ToMap() map[Key]Value
-}
-
-type CachePutter[Key comparable, Value any] interface {
-	// Add a new item to the cache
-	Put(Key, Value)
-}
-
-type CacheRemover[Key comparable, Value any] interface {
-	// Remove an item from the cache
-	Remove(Key)
-}
-
-type Cache[Key comparable, Value any] interface {
-	CacheClearer[Key, Value]
-	CacheCloser[Key, Value]
-	CacheCounter[Key, Value]
-	CacheGetter[Key, Value]
-	CacheIter[Key, Value]
-	CacheLoader[Key, Value]
-	CacheMapper[Key, Value]
-	CachePutter[Key, Value]
-	CacheRemover[Key, Value]
+	// Clears the whole cache
+	Clear()
+	// Cleanup any timers
+	Close()
 }
 
 type CacheImpl[Key comparable, Value any] struct {
