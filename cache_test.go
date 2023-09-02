@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func createCache(options ...Option[int, int]) Cache[int, int] {
+func createCache(options ...Option[int, int]) Cacher[int, int] {
 	return New(options...)
 }
 
@@ -53,6 +53,19 @@ func Test_Core(t *testing.T) {
 		cache.ForEach(func(key, value int) {
 			assert.Equal(t, key+1, value)
 		})
+	})
+	t.Run("channel", func(t *testing.T) {
+		cache := createCache()
+		keys := []int{1, 2, 3}
+
+		for i := 0; i < len(keys); i++ {
+			cache.Put(i, keys[i])
+		}
+
+		for entry := range cache.Channel() {
+			assert.Equal(t, entry.Key+1, entry.Value)
+		}
+
 	})
 	t.Run("get should error without loader and value in cache", func(t *testing.T) {
 		cache := createCache()
@@ -111,6 +124,10 @@ func Test_Core(t *testing.T) {
 		has := cache.Has(key)
 
 		assert.True(t, has)
+	})
+	t.Run("isEtmpy", func(t *testing.T) {
+		cache := createCache()
+		assert.True(t, cache.IsEmpty())
 	})
 	t.Run("keys", func(t *testing.T) {
 		cache := createCache()
