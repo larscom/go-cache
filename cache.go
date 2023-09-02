@@ -105,13 +105,14 @@ func (c *Cache[Key, Value]) Channel() <-chan Entry[Key, Value] {
 	itemchn := make(chan Entry[Key, Value], e.Count())
 
 	go func() {
+		defer close(itemchn)
+
 		for item := range e.IterBuffered() {
 			itemchn <- Entry[Key, Value]{
 				Key:   item.Key,
 				Value: item.Val.value,
 			}
 		}
-		close(itemchn)
 	}()
 
 	return itemchn

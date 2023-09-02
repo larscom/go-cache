@@ -215,6 +215,25 @@ func Test_WithExpireAfterWrite(t *testing.T) {
 
 		wg.Wait()
 	})
+	t.Run("channel", func(t *testing.T) {
+		ttl := time.Millisecond * 10
+		c := createCache(WithExpireAfterWrite[int, int](ttl))
+		c.Put(1, 100)
+
+		<-time.After(time.Millisecond * 15)
+		c.Put(2, 200)
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+
+		for item := range c.Channel() {
+			assert.Equal(t, 2, item.Key)
+			assert.Equal(t, 200, item.Value)
+			wg.Done()
+		}
+
+		wg.Wait()
+	})
 	t.Run("get", func(t *testing.T) {
 		ttl := time.Millisecond * 10
 		c := createCache(WithExpireAfterWrite[int, int](ttl))
@@ -276,6 +295,15 @@ func Test_WithExpireAfterWrite(t *testing.T) {
 		<-time.After(time.Millisecond * 15)
 		has := c.Has(1)
 		assert.False(t, has)
+	})
+	t.Run("isEmpty", func(t *testing.T) {
+		ttl := time.Millisecond * 10
+		c := createCache(WithExpireAfterWrite[int, int](ttl))
+
+		c.Put(1, 100)
+		<-time.After(time.Millisecond * 15)
+
+		assert.True(t, c.IsEmpty())
 	})
 	t.Run("keys", func(t *testing.T) {
 		ttl := time.Millisecond * 10
