@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/smallnest/safemap"
-	"golang.org/x/exp/maps"
 )
 
 type Entry[Key comparable, Value any] struct {
@@ -89,7 +88,7 @@ func (c *Cache[Key, Value]) Close() {
 
 func (c *Cache[Key, Value]) Count() int {
 	e := c.entries
-	if c.expireAfterWrite > 0 {
+	if c.isTimerEnabled() {
 		e = c.getActiveEntries()
 	}
 
@@ -98,7 +97,7 @@ func (c *Cache[Key, Value]) Count() int {
 
 func (c *Cache[Key, Value]) Channel() <-chan Entry[Key, Value] {
 	e := c.entries
-	if c.expireAfterWrite > 0 {
+	if c.isTimerEnabled() {
 		e = c.getActiveEntries()
 	}
 
@@ -119,13 +118,8 @@ func (c *Cache[Key, Value]) Channel() <-chan Entry[Key, Value] {
 }
 
 func (c *Cache[Key, Value]) ForEach(fn func(Key, Value)) {
-	e := c.entries
-	if c.expireAfterWrite > 0 {
-		e = c.getActiveEntries()
-	}
-
-	for item := range e.IterBuffered() {
-		fn(item.Key, item.Val.value)
+	for item := range c.Channel() {
+		fn(item.Key, item.Value)
 	}
 }
 
@@ -140,7 +134,7 @@ func (c *Cache[Key, Value]) Get(key Key) (Value, error) {
 
 	value, err := c.load(key)
 
-	unlock()
+	defer unlock()
 
 	if err == nil {
 		c.Put(key, value)
@@ -162,10 +156,8 @@ func (c *Cache[Key, Value]) GetIfPresent(key Key) (Value, bool) {
 
 func (c *Cache[Key, Value]) Refresh(key Key) (Value, error) {
 	unlock := c.loaderMu.lock(key)
-
+	defer unlock()
 	value, err := c.load(key)
-
-	unlock()
 
 	if err == nil {
 		c.Put(key, value)
@@ -181,7 +173,7 @@ func (c *Cache[Key, Value]) Has(key Key) bool {
 
 func (c *Cache[Key, Value]) IsEmpty() bool {
 	e := c.entries
-	if c.expireAfterWrite > 0 {
+	if c.isTimerEnabled() {
 		e = c.getActiveEntries()
 	}
 
@@ -190,7 +182,7 @@ func (c *Cache[Key, Value]) IsEmpty() bool {
 
 func (c *Cache[Key, Value]) Keys() []Key {
 	e := c.entries
-	if c.expireAfterWrite > 0 {
+	if c.isTimerEnabled() {
 		e = c.getActiveEntries()
 	}
 
@@ -206,13 +198,12 @@ func (c *Cache[Key, Value]) Remove(key Key) {
 }
 
 func (c *Cache[Key, Value]) ToMap() map[Key]Value {
-	m := make(map[Key]Value)
-
 	e := c.entries
-	if c.expireAfterWrite > 0 {
+	if c.isTimerEnabled() {
 		e = c.getActiveEntries()
 	}
 
+	m := make(map[Key]Value)
 	for item := range e.IterBuffered() {
 		m[item.Key] = item.Val.value
 	}
@@ -222,16 +213,15 @@ func (c *Cache[Key, Value]) ToMap() map[Key]Value {
 
 func (c *Cache[Key, Value]) Values() []Value {
 	e := c.entries
-	if c.expireAfterWrite > 0 {
+	if c.isTimerEnabled() {
 		e = c.getActiveEntries()
 	}
 
-	entries := maps.Values(e.Items())
-	n := len(entries)
-	values := make([]Value, n)
-	for i := 0; i < n; i++ {
-		values[i] = entries[i].value
+	values := make([]Value, 0)
+	for item := range e.IterBuffered() {
+		values = append(values, item.Val.value)
 	}
+
 	return values
 }
 
@@ -275,7 +265,7 @@ func WithOnExpired[Key comparable, Value any](
 func (c *Cache[Key, Value]) newEntry(key Key, value Value) *cacheEntry[Key, Value] {
 	var expiration time.Time
 
-	if c.expireAfterWrite > 0 {
+	if c.isTimerEnabled() {
 		expiration = time.Now().Add(c.expireAfterWrite)
 	}
 
@@ -315,4 +305,8 @@ func (c *Cache[Key, Value]) load(key Key) (Value, error) {
 	value, err := c.loader(key)
 
 	return value, err
+}
+
+func (c *Cache[Key, Value]) isTimerEnabled() bool {
+	return c.expireAfterWrite > 0
 }

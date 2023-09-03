@@ -3,6 +3,7 @@ package cache
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -399,6 +400,135 @@ func Test_Expiration(t *testing.T) {
 }
 
 func Test_WithLoader(t *testing.T) {
+	t.Run("loader func called once in concurrent environment", func(t *testing.T) {
+		var (
+			counter int64
+			wg      sync.WaitGroup
+		)
+
+		c := createCache(WithLoader(func(key int) (int, error) {
+			atomic.AddInt64(&counter, 1)
+			time.Sleep(time.Millisecond * 30)
+			return key, nil
+		}))
+
+		wg.Add(3)
+		go func() {
+			defer wg.Done()
+			start := time.Now()
+			val, err := c.Get(100)
+			end := time.Since(start)
+			if err != nil {
+				t.Error(err)
+			}
+			fmt.Println("Took", end, "Value", val)
+		}()
+		go func() {
+			defer wg.Done()
+			start := time.Now()
+			val, err := c.Get(100)
+			end := time.Since(start)
+			if err != nil {
+				t.Error(err)
+			}
+			fmt.Println("Took", end, "Value", val)
+		}()
+		go func() {
+			defer wg.Done()
+			start := time.Now()
+			val, err := c.Get(100)
+			end := time.Since(start)
+			if err != nil {
+				t.Error(err)
+			}
+			fmt.Println("Took", end, "Value", val)
+		}()
+
+		wg.Wait()
+		assert.Equal(t, int64(1), atomic.LoadInt64(&counter))
+	})
+
+	t.Run("loader func called twice in concurrent environment with 2 different keys", func(t *testing.T) {
+		var (
+			counter int64
+			wg      sync.WaitGroup
+		)
+
+		c := createCache(WithLoader(func(key int) (int, error) {
+			atomic.AddInt64(&counter, 1)
+			time.Sleep(time.Millisecond * 30)
+			return key, nil
+		}))
+
+		wg.Add(6)
+		// key 100
+		go func() {
+			defer wg.Done()
+			start := time.Now()
+			val, err := c.Get(100)
+			end := time.Since(start)
+			if err != nil {
+				t.Error(err)
+			}
+			fmt.Println("Took", end, "Value", val)
+		}()
+		go func() {
+			defer wg.Done()
+			start := time.Now()
+			val, err := c.Get(100)
+			end := time.Since(start)
+			if err != nil {
+				t.Error(err)
+			}
+			fmt.Println("Took", end, "Value", val)
+		}()
+		go func() {
+			defer wg.Done()
+			start := time.Now()
+			val, err := c.Get(100)
+			end := time.Since(start)
+			if err != nil {
+				t.Error(err)
+			}
+			fmt.Println("Took", end, "Value", val)
+		}()
+
+		// key 200
+		go func() {
+			defer wg.Done()
+			start := time.Now()
+			val, err := c.Get(200)
+			end := time.Since(start)
+			if err != nil {
+				t.Error(err)
+			}
+			fmt.Println("Took", end, "Value", val)
+		}()
+		go func() {
+			defer wg.Done()
+			start := time.Now()
+			val, err := c.Get(200)
+			end := time.Since(start)
+			if err != nil {
+				t.Error(err)
+			}
+			fmt.Println("Took", end, "Value", val)
+		}()
+		go func() {
+			defer wg.Done()
+			start := time.Now()
+			val, err := c.Get(200)
+			end := time.Since(start)
+			if err != nil {
+				t.Error(err)
+			}
+			fmt.Println("Took", end, "Value", val)
+		}()
+
+		wg.Wait()
+		assert.Equal(t, int64(2), atomic.LoadInt64(&counter))
+	})
+
 	t.Run("get from loader", func(t *testing.T) {
 		c := createCache(WithLoader(func(key int) (int, error) {
 			return 12345, nil
