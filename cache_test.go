@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func createCache(options ...Option[int, int]) Cacher[int, int] {
+func createCache(options ...Option[int, int]) Cache[int, int] {
 	return New(options...)
 }
 
