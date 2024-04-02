@@ -41,7 +41,7 @@ type Cache[K comparable, V any] interface {
 func WithExpireAfterWrite[K comparable, V any](
 	expireAfterWrite time.Duration,
 ) Option[K, V] {
-	cleanupInterval := time.Second * 10
+	cleanupInterval := time.Second * 5
 	return withExpireAfterWrite[K, V](expireAfterWrite, cleanupInterval)
 }
 
