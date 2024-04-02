@@ -61,7 +61,7 @@ func main() {
 
 ## 🫱 Cache
 
-Create a `regular` cache (without `Load` and `Reload` functions) with `TTL`
+> Create a `regular` cache (without `Load` and `Reload` functions) with `TTL`
 
 ```go
 func main() {
