@@ -1,312 +1,172 @@
 package cache
 
 import (
-	"context"
-	"fmt"
 	"time"
 
-	"github.com/smallnest/safemap"
+	csmap "github.com/mhmtszr/concurrent-swiss-map"
 )
 
-type CacheEntry[Key comparable, Value any] struct {
-	Key   Key
-	Value Value
-}
+type Option[K comparable, V any] func(c *cache[K, V])
 
-type Option[Key comparable, Value any] func(c *cache[Key, Value])
+type Cache[K comparable, V any] interface {
+	// Get an item from the cache.
+	Get(key K) (V, bool)
 
-type LoaderFunc[Key comparable, Value any] func(Key) (Value, error)
+	// Put an item into cache.
+	Put(key K, value V)
 
-type Cache[Key comparable, Value any] interface {
-	// GetIfPresent Get item from cache (if present) without loader
-	GetIfPresent(Key) (Value, bool)
-	// Has See if cache contains a key
-	Has(Key) bool
-	// IsEmpty See if there are any entries in the cache
+	// Returns true when the item exist in cache.
+	Has(key K) bool
+
+	// Returns true if the cache is empty.
 	IsEmpty() bool
-	// Get Retrieve item with the loader function (if configured)
-	// (thread safe) it is only ever called once, even if it's called from multiple goroutines.
-	Get(Key) (Value, error)
-	// Put Add a new item to the cache
-	Put(Key, Value)
-	// Count Total amount of entries
+
+	// Returns the total count of cached items.
 	Count() int
-	// Channel Returns a buffered channel, it can be used to range over all entries
-	Channel() <-chan CacheEntry[Key, Value]
-	// Refresh item in cache
-	Refresh(Key) (Value, error)
-	// Remove an item from the cache
-	Remove(Key)
-	// ToMap Get the map with the key/value pairs, it will be in indeterminate order.
-	ToMap() map[Key]Value
-	// ForEach Loop over each entry in the cache
-	ForEach(func(Key, Value))
-	// Values Get all values, it will be in indeterminate order.
-	Values() []Value
-	// Keys Get all keys, it will be in indeterminate order.
-	Keys() []Key
-	// Clear Clears the whole cache
+
+	// Loop over each entry in the cache.
+	ForEach(func(key K, value V))
+
+	// Deletes an item from the cache.
+	Delete(key K)
+
+	// Clear all items from cache.
 	Clear()
-	// Close Cleanup any timers
+
+	// Cleanup resources and timers.
 	Close()
 }
 
-type cache[Key comparable, Value any] struct {
-	entries *safemap.SafeMap[Key, *cacheEntry[Key, Value]]
-
-	loaderMu keyedMutex[Key]
-	loader   LoaderFunc[Key, Value]
-
-	expireAfterWrite time.Duration
-	onExpired        func(Key, Value)
-
-	cancel context.CancelFunc
-	ticker *ticker
+// The 'TTL' after it has been written to the cache.
+func WithExpireAfterWrite[K comparable, V any](
+	expireAfterWrite time.Duration,
+) Option[K, V] {
+	cleanupInterval := time.Second * 10
+	return withExpireAfterWrite[K, V](expireAfterWrite, cleanupInterval)
 }
 
-func New[Key comparable, Value any](
-	options ...Option[Key, Value],
-) Cache[Key, Value] {
-	c := &cache[Key, Value]{
-		entries: safemap.New[Key, *cacheEntry[Key, Value]](),
+type cache[K comparable, V any] struct {
+	data *csmap.CsMap[K, *entry[K, V]]
+
+	mu         loaderMutex[K]
+	loaderFunc LoaderFunc[K, V]
+
+	expireAfterWrite time.Duration
+	cleaner          cleaner[K, V]
+}
+
+func NewCache[K comparable, V any](
+	options ...Option[K, V],
+) Cache[K, V] {
+	data := csmap.Create[K, *entry[K, V]]()
+	c := &cache[K, V]{
+		data:    data,
+		cleaner: newCacheCleaner(data),
 	}
-	for _, opt := range options {
-		opt(c)
+
+	for _, option := range options {
+		option(c)
 	}
+
 	return c
 }
 
-func (c *cache[Key, Value]) Clear() {
-	c.entries.Clear()
+func (c *cache[K, V]) Get(key K) (V, bool) {
+	return c.get(key)
 }
 
-func (c *cache[Key, Value]) Close() {
-	if c.cancel != nil {
-		c.cancel()
-	}
+func (c *cache[K, V]) Put(key K, value V) {
+	c.data.Store(key, c.newEntry(key, value))
 }
 
-func (c *cache[Key, Value]) Count() int {
-	e := c.entries
-	if c.isTimerEnabled() {
-		e = c.getActiveEntries()
-	}
-
-	return e.Count()
-}
-
-func (c *cache[Key, Value]) Channel() <-chan CacheEntry[Key, Value] {
-	e := c.entries
-	if c.isTimerEnabled() {
-		e = c.getActiveEntries()
-	}
-
-	itemchn := make(chan CacheEntry[Key, Value], e.Count())
-
-	go func() {
-		defer close(itemchn)
-
-		for item := range e.IterBuffered() {
-			itemchn <- CacheEntry[Key, Value]{
-				Key:   item.Key,
-				Value: item.Val.value,
-			}
-		}
-	}()
-
-	return itemchn
-}
-
-func (c *cache[Key, Value]) ForEach(fn func(Key, Value)) {
-	for item := range c.Channel() {
-		fn(item.Key, item.Value)
-	}
-}
-
-func (c *cache[Key, Value]) Get(key Key) (Value, error) {
-	unlock := c.loaderMu.lock(key)
-
-	entry, found := c.entries.Get(key)
-	if found && !entry.isExpired() {
-		unlock()
-		return entry.value, nil
-	}
-
-	value, err := c.load(key)
-
-	defer unlock()
-
-	if err == nil {
-		c.Put(key, value)
-	}
-
-	return value, err
-}
-
-func (c *cache[Key, Value]) GetIfPresent(key Key) (Value, bool) {
-	entry, found := c.entries.Get(key)
-
-	if found && !entry.isExpired() {
-		return entry.value, true
-	}
-
-	var value Value
-	return value, false
-}
-
-func (c *cache[Key, Value]) Refresh(key Key) (Value, error) {
-	unlock := c.loaderMu.lock(key)
-	defer unlock()
-	value, err := c.load(key)
-
-	if err == nil {
-		c.Put(key, value)
-	}
-
-	return value, err
-}
-
-func (c *cache[Key, Value]) Has(key Key) bool {
-	_, found := c.GetIfPresent(key)
+func (c *cache[K, V]) Has(key K) bool {
+	_, found := c.get(key)
 	return found
 }
 
-func (c *cache[Key, Value]) IsEmpty() bool {
-	e := c.entries
-	if c.isTimerEnabled() {
-		e = c.getActiveEntries()
+func (c *cache[K, V]) IsEmpty() bool {
+	return c.Count() == 0
+}
+
+func (c *cache[K, V]) Count() int {
+	count := 0
+	c.forEachEntry(func(key K, entry *entry[K, V]) {
+		if entry.isValid() {
+			count++
+		}
+	})
+	return count
+}
+
+func (c *cache[K, V]) ForEach(fn func(key K, value V)) {
+	c.forEachEntry(func(key K, entry *entry[K, V]) {
+		if entry.isValid() {
+			fn(key, entry.value)
+		}
+	})
+}
+
+func (c *cache[K, V]) Delete(key K) {
+	c.data.Delete(key)
+}
+
+func (c *cache[K, V]) Clear() {
+	c.data.Clear()
+}
+
+func (c *cache[K, V]) Close() {
+	if c.hasExpireAfterWrite() {
+		c.cleaner.Stop()
+	}
+	c.data.Clear()
+}
+
+func (c *cache[K, V]) get(key K) (V, bool) {
+	entry, found := c.data.Load(key)
+
+	if found && entry.isValid() {
+		return entry.value, true
 	}
 
-	return e.IsEmpty()
+	var value V
+	return value, false
 }
 
-func (c *cache[Key, Value]) Keys() []Key {
-	e := c.entries
-	if c.isTimerEnabled() {
-		e = c.getActiveEntries()
+// Loop over each entry, including expired entries
+func (c *cache[K, V]) forEachEntry(fn func(key K, entry *entry[K, V])) {
+	c.data.Range(func(key K, entry *entry[K, V]) (stop bool) {
+		fn(key, entry)
+		return false
+	})
+}
+
+func (c *cache[K, V]) newEntry(key K, value V) *entry[K, V] {
+	if c.hasExpireAfterWrite() {
+		return newEntry(key, value, time.Now().Add(c.expireAfterWrite))
 	}
-
-	return e.Keys()
+	return newEntry(key, value, zeroTime)
 }
 
-func (c *cache[Key, Value]) Put(key Key, value Value) {
-	c.entries.Set(key, c.newEntry(key, value))
+func (c *cache[K, V]) hasExpireAfterWrite() bool {
+	return c.expireAfterWrite > 0
 }
 
-func (c *cache[Key, Value]) Remove(key Key) {
-	c.entries.Remove(key)
-}
-
-func (c *cache[Key, Value]) ToMap() map[Key]Value {
-	e := c.entries
-	if c.isTimerEnabled() {
-		e = c.getActiveEntries()
-	}
-
-	m := make(map[Key]Value)
-	for item := range e.IterBuffered() {
-		m[item.Key] = item.Val.value
-	}
-
-	return m
-}
-
-func (c *cache[Key, Value]) Values() []Value {
-	e := c.entries
-	if c.isTimerEnabled() {
-		e = c.getActiveEntries()
-	}
-
-	values := make([]Value, 0)
-	for item := range e.IterBuffered() {
-		values = append(values, item.Val.value)
-	}
-
-	return values
-}
-
-func WithExpireAfterWrite[Key comparable, Value any](
-	expireAfterWrite time.Duration,
-) Option[Key, Value] {
-	return WithExpireAfterWriteCustom[Key, Value](expireAfterWrite, time.Minute)
-}
-
-func WithExpireAfterWriteCustom[Key comparable, Value any](
+func withExpireAfterWrite[K comparable, V any](
 	expireAfterWrite time.Duration,
 	cleanupInterval time.Duration,
-) Option[Key, Value] {
-	return func(c *cache[Key, Value]) {
+) Option[K, V] {
+	return func(c *cache[K, V]) {
 		c.expireAfterWrite = expireAfterWrite
-		if c.ticker == nil {
-			ctx, cancel := context.WithCancel(context.Background())
-			c.cancel = cancel
-			c.ticker = newTicker(ctx, cleanupInterval)
-			c.ticker.start(c.cleanup)
-		}
+		c.cleaner.Start(cleanupInterval)
 	}
 }
 
-func WithLoader[Key comparable, Value any](
-	loader LoaderFunc[Key, Value],
-) Option[Key, Value] {
-	return func(c *cache[Key, Value]) {
-		c.loader = loader
+func withCleaner[K comparable, V any](
+	cleaner cleaner[K, V],
+	cleanupInterval time.Duration,
+) Option[K, V] {
+	return func(c *cache[K, V]) {
+		c.cleaner = cleaner
+		cleaner.Start(cleanupInterval)
 	}
-}
-
-func WithOnExpired[Key comparable, Value any](
-	onExpired func(Key, Value),
-) Option[Key, Value] {
-	return func(c *cache[Key, Value]) {
-		c.onExpired = onExpired
-	}
-}
-
-func (c *cache[Key, Value]) newEntry(key Key, value Value) *cacheEntry[Key, Value] {
-	var expiration time.Time
-
-	if c.isTimerEnabled() {
-		expiration = time.Now().Add(c.expireAfterWrite)
-	}
-
-	return &cacheEntry[Key, Value]{key, value, expiration}
-}
-
-func (c *cache[Key, Value]) getActiveEntries() *safemap.SafeMap[Key, *cacheEntry[Key, Value]] {
-	m := safemap.New[Key, *cacheEntry[Key, Value]]()
-	for item := range c.entries.IterBuffered() {
-		if !item.Val.isExpired() {
-			m.Set(item.Key, item.Val)
-		}
-	}
-	return m
-}
-
-func (c *cache[Key, Value]) cleanup() {
-	keys := c.entries.Keys()
-
-	for _, key := range keys {
-		entry, found := c.entries.Get(key)
-		if found && entry.isExpired() {
-			c.Remove(key)
-			if c.onExpired != nil {
-				c.onExpired(entry.key, entry.value)
-			}
-		}
-	}
-}
-
-func (c *cache[Key, Value]) load(key Key) (Value, error) {
-	if c.loader == nil {
-		var val Value
-		return val, fmt.Errorf("you must configure a loader, use GetIfPresent instead")
-	}
-
-	value, err := c.loader(key)
-
-	return value, err
-}
-
-func (c *cache[Key, Value]) isTimerEnabled() bool {
-	return c.expireAfterWrite > 0
 }

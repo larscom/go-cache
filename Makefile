@@ -3,7 +3,7 @@ build:
 	go build -v ./...
 
 test:
-	go test -v ./.../ --race
+	go test -timeout 5s -v ./.../ --race
 
 coverage:
 	go test -v -coverprofile=cover.out -covermode=atomic ./.../
