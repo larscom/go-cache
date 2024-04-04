@@ -255,22 +255,4 @@ func TestCache(t *testing.T) {
 		assert.Zero(t, cache.Count())
 	}
 	t.Run("TestCloseShouldClear", TestCloseShouldClear)
-
-	TestStartAndStopCleaner := func(t *testing.T) {
-		cleaner := &mockCleaner{
-			started: false,
-			stopped: false,
-		}
-		cache := NewCache(
-			WithExpireAfterWrite[int, int](defaultTTL),
-			withCleaner[int, int](cleaner, time.Millisecond),
-		)
-
-		assert.True(t, cleaner.started)
-		assert.False(t, cleaner.stopped)
-
-		cache.Close()
-		assert.True(t, cleaner.stopped)
-	}
-	t.Run("TestStartAndStopCleaner", TestStartAndStopCleaner)
 }

@@ -41,8 +41,13 @@ type Cache[K comparable, V any] interface {
 func WithExpireAfterWrite[K comparable, V any](
 	expireAfterWrite time.Duration,
 ) Option[K, V] {
-	cleanupInterval := time.Second * 5
-	return withExpireAfterWrite[K, V](expireAfterWrite, cleanupInterval)
+	return func(c *cache[K, V]) {
+		c.expireAfterWrite = expireAfterWrite
+		c.cleaner = newCacheCleaner(c.data)
+
+		cleanupInterval := time.Second * 5
+		c.cleaner.Start(cleanupInterval)
+	}
 }
 
 type cache[K comparable, V any] struct {
@@ -52,16 +57,15 @@ type cache[K comparable, V any] struct {
 	loaderFunc LoaderFunc[K, V]
 
 	expireAfterWrite time.Duration
-	cleaner          cleaner[K, V]
+
+	cleaner cleaner[K, V]
 }
 
 func NewCache[K comparable, V any](
 	options ...Option[K, V],
 ) Cache[K, V] {
-	data := csmap.Create[K, *entry[K, V]]()
 	c := &cache[K, V]{
-		data:    data,
-		cleaner: newCacheCleaner(data),
+		data: csmap.Create[K, *entry[K, V]](),
 	}
 
 	for _, option := range options {
@@ -122,9 +126,7 @@ func (c *cache[K, V]) Close() {
 }
 
 func (c *cache[K, V]) get(key K) (V, bool) {
-	entry, found := c.data.Load(key)
-
-	if found && entry.isValid() {
+	if entry, found := c.data.Load(key); found && entry.isValid() {
 		return entry.value, true
 	}
 
@@ -149,24 +151,4 @@ func (c *cache[K, V]) newEntry(key K, value V) *entry[K, V] {
 
 func (c *cache[K, V]) hasExpireAfterWrite() bool {
 	return c.expireAfterWrite > 0
-}
-
-func withExpireAfterWrite[K comparable, V any](
-	expireAfterWrite time.Duration,
-	cleanupInterval time.Duration,
-) Option[K, V] {
-	return func(c *cache[K, V]) {
-		c.expireAfterWrite = expireAfterWrite
-		c.cleaner.Start(cleanupInterval)
-	}
-}
-
-func withCleaner[K comparable, V any](
-	cleaner cleaner[K, V],
-	cleanupInterval time.Duration,
-) Option[K, V] {
-	return func(c *cache[K, V]) {
-		c.cleaner = cleaner
-		cleaner.Start(cleanupInterval)
-	}
 }

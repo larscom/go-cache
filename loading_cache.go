@@ -28,12 +28,9 @@ func NewLoadingCache[K comparable, V any](
 	loaderFunc LoaderFunc[K, V],
 	options ...Option[K, V],
 ) LoadingCache[K, V] {
-
-	data := csmap.Create[K, *entry[K, V]]()
 	c := &cache[K, V]{
 		loaderFunc: loaderFunc,
-		data:       data,
-		cleaner:    newCacheCleaner(data),
+		data:       csmap.Create[K, *entry[K, V]](),
 	}
 
 	for _, option := range options {

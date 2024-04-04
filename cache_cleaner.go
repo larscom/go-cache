@@ -6,18 +6,6 @@ import (
 	csmap "github.com/mhmtszr/concurrent-swiss-map"
 )
 
-type mockCleaner struct {
-	started bool
-	stopped bool
-}
-
-func (c *mockCleaner) Start(i time.Duration) {
-	c.started = true
-}
-func (c *mockCleaner) Stop() {
-	c.stopped = true
-}
-
 type cleaner[K comparable, V any] interface {
 	// Starts cleaning at the given interval.
 	Start(i time.Duration)

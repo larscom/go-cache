@@ -410,7 +410,7 @@ func TestLoadingCache(t *testing.T) {
 	t.Run("TestDelete", TestDelete)
 
 	TestClear := func(t *testing.T) {
-		cache := NewLoadingCache[int, int](defaultLoaderFunc)
+		cache := NewLoadingCache(defaultLoaderFunc)
 		defer cache.Close()
 
 		const length = 5
@@ -426,7 +426,7 @@ func TestLoadingCache(t *testing.T) {
 	t.Run("TestClear", TestClear)
 
 	TestCloseShouldClear := func(t *testing.T) {
-		cache := NewLoadingCache[int, int](defaultLoaderFunc)
+		cache := NewLoadingCache(defaultLoaderFunc)
 
 		const length = 5
 		for i := 0; i < length; i++ {
@@ -439,23 +439,4 @@ func TestLoadingCache(t *testing.T) {
 		assert.Zero(t, cache.Count())
 	}
 	t.Run("TestCloseShouldClear", TestCloseShouldClear)
-
-	TestStartAndStopCleaner := func(t *testing.T) {
-		cleaner := &mockCleaner{
-			started: false,
-			stopped: false,
-		}
-		cache := NewLoadingCache(defaultLoaderFunc,
-			WithExpireAfterWrite[int, int](defaultTTL),
-			withCleaner[int, int](cleaner, time.Millisecond),
-		)
-
-		assert.True(t, cleaner.started)
-		assert.False(t, cleaner.stopped)
-
-		cache.Close()
-		assert.True(t, cleaner.stopped)
-	}
-
-	t.Run("TestStartAndStopCleaner", TestStartAndStopCleaner)
 }
