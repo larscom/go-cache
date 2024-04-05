@@ -6,31 +6,47 @@ import (
 	csmap "github.com/mhmtszr/concurrent-swiss-map"
 )
 
+type mockCleaner struct {
+	started bool
+	stopped bool
+}
+
+func (c *mockCleaner) Start() {
+	c.started = true
+}
+
+func (c *mockCleaner) Stop() {
+	c.stopped = true
+}
+
 type cleaner[K comparable, V any] interface {
-	// Starts cleaning at the given interval.
-	Start(i time.Duration)
+	// Start cleaning at intervals.
+	Start()
 
 	// Stop cleaning.
 	Stop()
 }
 
 type cacheCleaner[K comparable, V any] struct {
-	data    *csmap.CsMap[K, *entry[K, V]]
-	donechn chan (struct{})
+	data            *csmap.CsMap[K, *entry[K, V]]
+	cleanupInterval time.Duration
+	donechn         chan (struct{})
 }
 
 func newCacheCleaner[K comparable, V any](
 	data *csmap.CsMap[K, *entry[K, V]],
+	cleanupInterval time.Duration,
 ) cleaner[K, V] {
 	return &cacheCleaner[K, V]{
-		data:    data,
-		donechn: make(chan struct{}),
+		data:            data,
+		cleanupInterval: cleanupInterval,
+		donechn:         make(chan struct{}),
 	}
 }
 
-func (c *cacheCleaner[K, V]) Start(interval time.Duration) {
+func (c *cacheCleaner[K, V]) Start() {
 	go func() {
-		ticker := time.NewTicker(interval)
+		ticker := time.NewTicker(c.cleanupInterval)
 		defer ticker.Stop()
 		for {
 			select {

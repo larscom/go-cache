@@ -43,10 +43,6 @@ func WithExpireAfterWrite[K comparable, V any](
 ) Option[K, V] {
 	return func(c *cache[K, V]) {
 		c.expireAfterWrite = expireAfterWrite
-		c.cleaner = newCacheCleaner(c.data)
-
-		cleanupInterval := time.Second * 5
-		c.cleaner.Start(cleanupInterval)
 	}
 }
 
@@ -64,12 +60,27 @@ type cache[K comparable, V any] struct {
 func NewCache[K comparable, V any](
 	options ...Option[K, V],
 ) Cache[K, V] {
+	data := csmap.Create[K, *entry[K, V]]()
+	cleaner := newCacheCleaner(data, time.Second*5)
+	return newCache(data, cleaner, options...)
+}
+
+func newCache[K comparable, V any](
+	data *csmap.CsMap[K, *entry[K, V]],
+	cleaner cleaner[K, V],
+	options ...Option[K, V],
+) *cache[K, V] {
 	c := &cache[K, V]{
-		data: csmap.Create[K, *entry[K, V]](),
+		data:    data,
+		cleaner: cleaner,
 	}
 
 	for _, option := range options {
 		option(c)
+	}
+
+	if c.hasExpireAfterWrite() {
+		c.cleaner.Start()
 	}
 
 	return c

@@ -14,10 +14,10 @@ func TestStartCleaner(t *testing.T) {
 	data.Store(1, newEntry(1, 100, time.Now()))
 	data.Store(2, newEntry(2, 200, time.Now().Add(time.Millisecond*20)))
 
-	cleaner := newCacheCleaner(data)
+	cleaner := newCacheCleaner(data, time.Millisecond)
 	defer cleaner.Stop()
 
-	cleaner.Start(time.Millisecond)
+	cleaner.Start()
 
 	<-time.After(time.Millisecond * 5)
 
@@ -32,8 +32,8 @@ func TestStopCleaner(t *testing.T) {
 
 	data.Store(key, newEntry(key, 100, time.Now().Add(time.Millisecond*20)))
 
-	cleaner := newCacheCleaner(data)
-	cleaner.Start(time.Millisecond)
+	cleaner := newCacheCleaner(data, time.Millisecond)
+	cleaner.Start()
 
 	<-time.After(time.Millisecond * 5)
 	assert.True(t, data.Has(key))

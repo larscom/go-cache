@@ -1,6 +1,10 @@
 package cache
 
-import csmap "github.com/mhmtszr/concurrent-swiss-map"
+import (
+	"time"
+
+	csmap "github.com/mhmtszr/concurrent-swiss-map"
+)
 
 // Function that gets executed by the 'Load' and 'Reload' function
 type LoaderFunc[K comparable, V any] func(key K) (V, error)
@@ -28,16 +32,10 @@ func NewLoadingCache[K comparable, V any](
 	loaderFunc LoaderFunc[K, V],
 	options ...Option[K, V],
 ) LoadingCache[K, V] {
-	c := &cache[K, V]{
-		loaderFunc: loaderFunc,
-		data:       csmap.Create[K, *entry[K, V]](),
-	}
-
-	for _, option := range options {
-		option(c)
-	}
-
-	return c
+	data := csmap.Create[K, *entry[K, V]]()
+	cleaner := newCacheCleaner(data, time.Second*5)
+	opts := append(options, withLoaderFunc(loaderFunc))
+	return newCache(data, cleaner, opts...)
 }
 
 func (c *cache[K, V]) Load(key K) (V, error) {
@@ -73,4 +71,12 @@ func (c *cache[K, V]) Reload(key K) (V, error) {
 func NoopLoaderFunc[K comparable, V any](key K) (V, error) {
 	var empty V
 	return empty, nil
+}
+
+func withLoaderFunc[K comparable, V any](
+	loaderFunc LoaderFunc[K, V],
+) Option[K, V] {
+	return func(c *cache[K, V]) {
+		c.loaderFunc = loaderFunc
+	}
 }
