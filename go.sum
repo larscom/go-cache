@@ -1,7 +1,5 @@
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/mhmtszr/concurrent-swiss-map v1.0.6 h1:buAXz0eIWJm0ogPWJGKXdONOzk7aW1Qi0/qzPhZMvGE=
-github.com/mhmtszr/concurrent-swiss-map v1.0.6/go.mod h1:F6QETL48Qn7jEJ3ZPt7EqRZjAAZu7lRQeQGIzXuUIDc=
 github.com/mhmtszr/concurrent-swiss-map v1.0.8 h1:GDSxgVrXsPFsraUJaPMm7ptYulj8qnWPgnwXcWbJNxo=
 github.com/mhmtszr/concurrent-swiss-map v1.0.8/go.mod h1:F6QETL48Qn7jEJ3ZPt7EqRZjAAZu7lRQeQGIzXuUIDc=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
