@@ -2,7 +2,6 @@
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/larscom/go-cache)](https://goreportcard.com/report/github.com/larscom/go-cache)
 [![Go Reference](https://pkg.go.dev/badge/github.com/larscom/go-cache.svg)](https://pkg.go.dev/github.com/larscom/go-cache)
-[![codecov](https://codecov.io/gh/larscom/go-cache/graph/badge.svg?token=E9wcYNmOYN)](https://codecov.io/gh/larscom/go-cache)
 
 > High performance, simple generic cache written in GO, including a `loading` cache.
 

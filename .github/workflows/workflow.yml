@@ -8,7 +8,7 @@ on:
       - '**'
   pull_request:
     branches:
-      - master
+      - main
 
 jobs:
   build:
@@ -20,13 +20,6 @@ jobs:
           go-version-file: './go.mod'
       - run: make build
       - run: make test
-      - run: make coverage
-      - uses: codecov/codecov-action@v4.5.0
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          file: ./cover.out
-          verbose: true   
-          slug: larscom/go-cache 
       - name: Run proxy.golang.org
         if: startsWith(github.ref, 'refs/tags/')
         run: curl https://proxy.golang.org/github.com/larscom/go-cache/@v/${{ github.ref_name }}.info
