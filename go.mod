@@ -3,7 +3,7 @@ module github.com/larscom/go-cache
 go 1.22.0
 
 require (
-	github.com/mhmtszr/concurrent-swiss-map v1.0.8
+	github.com/mhmtszr/concurrent-swiss-map v1.0.9
 	github.com/stretchr/testify v1.11.1
 )
 
