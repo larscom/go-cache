@@ -4,7 +4,7 @@ go 1.22.0
 
 require (
 	github.com/mhmtszr/concurrent-swiss-map v1.0.10
-	github.com/stretchr/testify v1.11.1
+	github.com/stretchr/testify v1.12.0
 )
 
 require (
